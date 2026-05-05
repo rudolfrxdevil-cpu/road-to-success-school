@@ -30,7 +30,8 @@ import {
   Maximize,
   Minimize,
   Medal,
-  Lock
+  Lock,
+  Flame
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -68,6 +69,8 @@ interface UserProfile {
   name: string;
   gradeLevel: string;
   points: number;
+  streak: number;
+  lastLoginDate: number;
   history: HistoryEntry[];
   schedule: Record<number, ScheduleSlot[]>; // 0 = Mon, 1 = Tue, etc.
 }
@@ -91,6 +94,9 @@ const ACHIEVEMENTS: Achievement[] = [
   { id: '3_grades_1', title: 'Streber', description: 'Du hast schon drei 1er geschrieben.', icon: '🤓', condition: (p) => p.history.filter(h => h.type === 'grade' && h.value === 1).length >= 3 },
   { id: '10_challenges', title: 'Herausforderer', description: 'Du hast 10 Daily Challenges geschafft.', icon: '⚔️', condition: (p) => p.history.filter(h => h.type === 'challenge').length >= 10 },
   { id: 'first_schedule', title: 'Organisiert', description: 'Du hast ein Fach in deinen Stundenplan eingetragen.', icon: '📅', condition: (p) => Object.values(p.schedule).some((day: any) => day && day.length > 0) },
+  { id: 'streak_3', title: 'Am Ball bleiben', description: 'Du warst 3 Tage in Folge aktiv.', icon: '🔥', condition: (p) => p.streak >= 3 },
+  { id: 'streak_7', title: 'Wochenmeister', description: 'Du warst 7 Tage in Folge aktiv.', icon: '📅', condition: (p) => p.streak >= 7 },
+  { id: 'streak_30', title: 'Unaufhaltsam', description: 'Ein ganzer Monat ununterbrochen aktiv!', icon: '🏆', condition: (p) => p.streak >= 30 },
   { id: 'rank_2', title: 'Aufsteiger', description: 'Du hast den zweiten Rang erreicht.', icon: '🚀', condition: (p) => p.points >= 500 },
   { id: 'points_10k', title: 'Punktestand über 9000!', description: 'Du hast über 9000 Punkte gesammelt.', icon: '🔥', condition: (p) => p.points >= 9001 },
 ];
@@ -177,6 +183,8 @@ function AuthScreen({ onAuth }: { onAuth: (username: string, profile: UserProfil
                 name: username,
                 gradeLevel: "10b",
                 points: 0,
+                streak: 0,
+                lastLoginDate: 0,
                 history: [],
                 schedule: { 0: [], 1: [], 2: [], 3: [], 4: [] }
               }
@@ -293,16 +301,49 @@ export default function App() {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (!parsed.schedule) parsed.schedule = { 0: [], 1: [], 2: [], 3: [], 4: [] };
+      if (typeof parsed.streak !== 'number') parsed.streak = 0;
+      if (typeof parsed.lastLoginDate !== 'number') parsed.lastLoginDate = 0;
       return parsed;
     }
     return {
       name: 'Schüler',
       gradeLevel: '10b',
       points: 0,
+      streak: 0,
+      lastLoginDate: 0,
       history: [],
       schedule: { 0: [], 1: [], 2: [], 3: [], 4: [] }
     };
   });
+
+  // Check and update streak
+  useEffect(() => {
+    if (authUsername) {
+      setProfile(prev => {
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+        const lastLogin = new Date(prev.lastLoginDate || 0);
+        const lastLoginDay = prev.lastLoginDate ? new Date(lastLogin.getFullYear(), lastLogin.getMonth(), lastLogin.getDate()).getTime() : 0;
+        const oneDay = 24 * 60 * 60 * 1000;
+        
+        let newStreak = prev.streak || 0;
+        if (lastLoginDay === 0) {
+          newStreak = 1;
+        } else if (today - lastLoginDay === oneDay) {
+          newStreak += 1;
+        } else if (today - lastLoginDay > oneDay) {
+          newStreak = 1;
+        } else if (today === lastLoginDay && newStreak === 0) {
+          newStreak = 1;
+        }
+        
+        if (prev.lastLoginDate !== today || prev.streak !== newStreak) {
+          return { ...prev, lastLoginDate: today, streak: newStreak };
+        }
+        return prev;
+      });
+    }
+  }, [authUsername]);
 
   const [isGradeModalOpen, setIsGradeModalOpen] = useState(false);
   const [isPartModalOpen, setIsPartModalOpen] = useState(false);
@@ -730,7 +771,7 @@ export default function App() {
                 <div className="absolute -top-6 -right-6 w-32 h-32 bg-primary/5 dark:bg-primary/10 rounded-full blur-3xl pointer-events-none" />
                 
                 <div className="flex items-start justify-between relative z-10">
-                  <div className="space-y-1">
+                  <div className="space-y-1 py-1">
                     <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Aktueller Rang</span>
                     <div className="flex items-center gap-2">
                       <span className="text-3xl">{currentRank.icon}</span>
@@ -739,9 +780,15 @@ export default function App() {
                       </h2>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <span className="block text-3xl font-display font-bold text-slate-900 dark:text-white">{profile.points}</span>
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Punkte</span>
+                  <div className="text-center py-1">
+                    <span className="flex items-center justify-center gap-1 block text-2xl font-display font-bold text-orange-500 dark:text-orange-400">
+                      <Flame className="w-5 h-5 -mt-0.5" /> {profile.streak}
+                    </span>
+                    <span className="text-[10px] font-bold text-orange-400/80 uppercase tracking-widest">Streak</span>
+                  </div>
+                  <div className="text-right py-1">
+                    <span className="block text-2xl font-display font-bold text-slate-900 dark:text-white">{profile.points}</span>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Punkte</span>
                   </div>
                 </div>
 

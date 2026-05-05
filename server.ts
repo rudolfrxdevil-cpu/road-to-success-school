@@ -52,6 +52,8 @@ async function startServer() {
           name: username,
           gradeLevel: "10b",
           points: 0,
+          streak: 0,
+          lastLoginDate: 0,
           history: [],
           schedule: { 0: [], 1: [], 2: [], 3: [], 4: [] }
         }
