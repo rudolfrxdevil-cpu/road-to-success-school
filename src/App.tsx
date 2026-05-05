@@ -116,8 +116,8 @@ const getTrendGrade = (subject: string, baseGrade: number, history: HistoryEntry
     grade = (baseGrade * 0.4) + (examAvg * 0.6); 
   }
   
-  // Participations improve it slightly (subtract 0.1 per participation)
-  grade = grade - (participations.length * 0.1);
+  // Participations improve it slightly (subtract 0.05 per participation)
+  grade = grade - (participations.length * 0.05);
   
   return Math.max(1, Math.min(6, grade)); // Grades from 1.0 to 6.0
 };
