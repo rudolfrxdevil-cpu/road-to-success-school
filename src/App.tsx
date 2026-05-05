@@ -76,6 +76,7 @@ interface UserProfile {
   history: HistoryEntry[];
   schedule: Record<number, ScheduleSlot[]>; // 0 = Mon, 1 = Tue, etc.
   diary?: { id: string; date: number; text: string }[];
+  estimatedGrades?: Record<string, number>;
 }
 
 type Tab = 'dashboard' | 'schedule' | 'stats' | 'achievements';
@@ -87,6 +88,39 @@ interface Achievement {
   icon: string;
   condition: (profile: UserProfile) => boolean;
 }
+
+const getAvailableSubjects = (profile: UserProfile): string[] => {
+  const subjects = new Set<string>();
+  Object.values(profile.schedule).forEach(day => {
+    day.forEach(slot => {
+      if (slot.subject) subjects.add(slot.subject);
+    });
+  });
+  profile.history.forEach(h => {
+    if (h.subject) subjects.add(h.subject);
+  });
+  return Array.from(subjects).sort();
+};
+
+const getTrendGrade = (subject: string, baseGrade: number, history: HistoryEntry[]): number => {
+  const subjectHistory = history.filter(h => h.subject === subject);
+  const examGrades = subjectHistory.filter(h => h.type === 'grade');
+  const participations = subjectHistory.filter(h => h.type === 'participation');
+  
+  let grade = baseGrade;
+  
+  // Tests heavily weight the grade
+  if (examGrades.length > 0) {
+    const examAvg = examGrades.reduce((sum, h) => sum + (Number(h.value) || 0), 0) / examGrades.length;
+    // 60% exam grade, 40% initial estimation
+    grade = (baseGrade * 0.4) + (examAvg * 0.6); 
+  }
+  
+  // Participations improve it slightly (subtract 0.1 per participation)
+  grade = grade - (participations.length * 0.1);
+  
+  return Math.max(1, Math.min(6, grade)); // Grades from 1.0 to 6.0
+};
 
 const ACHIEVEMENTS: Achievement[] = [
   { id: 'first_participation', title: 'Erste Meldung', description: 'Du hast dich zum ersten Mal gemeldet.', icon: '🙋', condition: (p) => p.history.some(h => h.type === 'participation') },
@@ -190,7 +224,8 @@ function AuthScreen({ onAuth }: { onAuth: (username: string, profile: UserProfil
                 lastLoginDate: 0,
                 history: [],
                 schedule: { 0: [], 1: [], 2: [], 3: [], 4: [] },
-                diary: []
+                diary: [],
+                estimatedGrades: {}
               }
             };
             localStorage.setItem('kh_users', JSON.stringify(localUsers));
@@ -308,6 +343,7 @@ export default function App() {
       if (typeof parsed.streak !== 'number') parsed.streak = 0;
       if (typeof parsed.lastLoginDate !== 'number') parsed.lastLoginDate = 0;
       if (!parsed.diary) parsed.diary = [];
+      if (!parsed.estimatedGrades) parsed.estimatedGrades = {};
       return parsed;
     }
     return {
@@ -318,7 +354,8 @@ export default function App() {
       lastLoginDate: 0,
       history: [],
       schedule: { 0: [], 1: [], 2: [], 3: [], 4: [] },
-      diary: []
+      diary: [],
+      estimatedGrades: {}
     };
   });
 
@@ -360,6 +397,9 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isApkModalOpen, setIsApkModalOpen] = useState(false);
   const [isDiaryOpen, setIsDiaryOpen] = useState(false);
+  const [isGradesOpen, setIsGradesOpen] = useState(false);
+  const [editingSubject, setEditingSubject] = useState<string | null>(null);
+  const [tempEstGrade, setTempEstGrade] = useState<number>(3);
   const [diaryText, setDiaryText] = useState("");
   const [statsTimeFilter, setStatsTimeFilter] = useState<'week' | 'month' | 'halfyear' | 'all'>('all');
   const [isAddSlotOpen, setIsAddSlotOpen] = useState<{ open: boolean; day: number }>({ open: false, day: 0 });
@@ -674,6 +714,17 @@ export default function App() {
     setDiaryText("");
   };
 
+  const saveEstimatedGrade = (subject: string, grade: number) => {
+    setProfile(prev => ({
+      ...prev,
+      estimatedGrades: {
+        ...(prev.estimatedGrades || {}),
+        [subject]: grade
+      }
+    }));
+    setEditingSubject(null);
+  };
+
   const addScheduleSlot = () => {
     if (!newSlot.subject) return;
     
@@ -856,22 +907,35 @@ export default function App() {
                   </motion.button>
                 </div>
                 
-                <motion.button
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => setIsDiaryOpen(true)}
-                  className="w-full flex items-center justify-between p-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-md transition-all group cursor-pointer"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-purple-50 dark:bg-purple-500/10 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
-                      <BookOpen className="text-purple-500 w-6 h-6" />
+                <div className="grid grid-cols-2 gap-4">
+                  <motion.button
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => setIsDiaryOpen(true)}
+                    className="flex items-center gap-3 p-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-md transition-all group cursor-pointer"
+                  >
+                    <div className="w-10 h-10 bg-purple-50 dark:bg-purple-500/10 rounded-xl flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                      <BookOpen className="text-purple-500 w-5 h-5" />
                     </div>
-                    <div className="text-left">
-                      <span className="block font-display font-bold text-slate-900 dark:text-white transition-colors">Tagebuch</span>
-                      <span className="text-xs text-purple-500 font-bold mt-0.5">Wie war dein Tag?</span>
+                    <div className="text-left flex-1 min-w-0">
+                      <span className="block font-display font-bold text-slate-900 dark:text-white truncate">Tagebuch</span>
+                      <span className="text-[10px] text-purple-500 font-bold block truncate">Tagesrückblick</span>
                     </div>
-                  </div>
-                  <ChevronRight className="w-5 h-5 text-slate-400 group-hover:translate-x-1 transition-transform" />
-                </motion.button>
+                  </motion.button>
+
+                  <motion.button
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => setIsGradesOpen(true)}
+                    className="flex items-center gap-3 p-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-md transition-all group cursor-pointer"
+                  >
+                    <div className="w-10 h-10 bg-orange-50 dark:bg-orange-500/10 rounded-xl flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                      <TrendingUp className="text-orange-500 w-5 h-5" />
+                    </div>
+                    <div className="text-left flex-1 min-w-0">
+                      <span className="block font-display font-bold text-slate-900 dark:text-white truncate">Noten</span>
+                      <span className="text-[10px] text-orange-500 font-bold block truncate">Prognose</span>
+                    </div>
+                  </motion.button>
+                </div>
               </section>
 
               {/* Daily Challenges */}
@@ -1599,6 +1663,97 @@ export default function App() {
                 >
                   Eintrag speichern
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {isGradesOpen && (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsGradesOpen(false)}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, y: 100, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 100, scale: 0.95 }}
+              className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl flex flex-col max-h-[80vh]"
+            >
+              <div className="flex justify-between items-center mb-6 shrink-0">
+                <h3 className="font-display font-bold text-xl dark:text-white flex items-center gap-2">
+                  <TrendingUp className="text-orange-500 w-6 h-6" />
+                  Noten-Prognose
+                </h3>
+                <button 
+                  onClick={() => setIsGradesOpen(false)}
+                  className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto min-h-0 space-y-4 pr-1">
+                {getAvailableSubjects(profile).length > 0 ? (
+                  getAvailableSubjects(profile).map(subject => {
+                    const baseGrade = profile.estimatedGrades?.[subject] || 3.0;
+                    const trend = getTrendGrade(subject, baseGrade, profile.history);
+                    return (
+                      <div key={subject} className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl">
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="font-bold text-slate-900 dark:text-white">{subject}</span>
+                          <span className="font-display font-bold text-2xl" style={{ 
+                            color: trend <= 2.5 ? '#10b981' : trend <= 4.0 ? '#f59e0b' : '#ef4444' 
+                          }}>
+                            {trend.toFixed(1)}
+                          </span>
+                        </div>
+                        
+                        {editingSubject === subject ? (
+                          <div className="flex flex-col gap-2 mt-4 pt-4 border-t border-slate-200 dark:border-slate-700">
+                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Grundschätzung (1-6)</label>
+                            <div className="flex items-center gap-3">
+                              <input 
+                                type="range" 
+                                min="1" max="6" step="0.5" 
+                                value={tempEstGrade} 
+                                onChange={(e) => setTempEstGrade(parseFloat(e.target.value))}
+                                className="flex-1 h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                              />
+                              <span className="font-bold text-slate-700 dark:text-slate-300 w-8">{tempEstGrade.toFixed(1)}</span>
+                            </div>
+                            <button 
+                              onClick={() => saveEstimatedGrade(subject, tempEstGrade)}
+                              className="w-full mt-2 bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 rounded-xl transition-colors cursor-pointer"
+                            >
+                              Speichern
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-between mt-2">
+                            <span className="text-xs text-slate-500 dark:text-slate-400">
+                              Basis: <b>{baseGrade.toFixed(1)}</b>
+                            </span>
+                            <button 
+                              onClick={() => { setTempEstGrade(baseGrade); setEditingSubject(subject); }}
+                              className="text-xs font-bold text-orange-500 hover:text-orange-600 cursor-pointer"
+                            >
+                              Anpassen
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="text-center py-8 text-slate-400 dark:text-slate-500">
+                    <TrendingUp className="w-12 h-12 mx-auto mb-3 opacity-20" />
+                    <p className="text-sm">Füge zuerst Fächer im Stundenplan oder durch Meldungen hinzu.</p>
+                  </div>
+                )}
               </div>
             </motion.div>
           </div>

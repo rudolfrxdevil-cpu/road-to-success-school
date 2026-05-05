@@ -56,7 +56,8 @@ async function startServer() {
           lastLoginDate: 0,
           history: [],
           schedule: { 0: [], 1: [], 2: [], 3: [], 4: [] },
-          diary: []
+          diary: [],
+          estimatedGrades: {}
         }
       };
       await writeDB(db);
