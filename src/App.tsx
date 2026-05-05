@@ -28,7 +28,9 @@ import {
   Sun,
   Target,
   Maximize,
-  Minimize
+  Minimize,
+  Medal,
+  Lock
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -70,7 +72,28 @@ interface UserProfile {
   schedule: Record<number, ScheduleSlot[]>; // 0 = Mon, 1 = Tue, etc.
 }
 
-type Tab = 'dashboard' | 'schedule' | 'stats';
+type Tab = 'dashboard' | 'schedule' | 'stats' | 'achievements';
+
+interface Achievement {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  condition: (profile: UserProfile) => boolean;
+}
+
+const ACHIEVEMENTS: Achievement[] = [
+  { id: 'first_participation', title: 'Erste Meldung', description: 'Du hast dich zum ersten Mal gemeldet.', icon: '🙋', condition: (p) => p.history.some(h => h.type === 'participation') },
+  { id: '10_participations', title: '10 Meldungen', description: 'Du hast dich 10 Mal gemeldet!', icon: '🗣️', condition: (p) => p.history.filter(h => h.type === 'participation').length >= 10 },
+  { id: '50_participations', title: 'Quasselstrippe', description: 'Du hast dich unglaubliche 50 Mal gemeldet.', icon: '🦜', condition: (p) => p.history.filter(h => h.type === 'participation').length >= 50 },
+  { id: '100_participations', title: 'Megaphon', description: 'Legendär! Du hast dich 100 Mal gemeldet.', icon: '📢', condition: (p) => p.history.filter(h => h.type === 'participation').length >= 100 },
+  { id: 'first_grade_1', title: 'Musterschüler', description: 'Du hast deine erste 1 geschrieben.', icon: '🌟', condition: (p) => p.history.some(h => h.type === 'grade' && h.value === 1) },
+  { id: '3_grades_1', title: 'Streber', description: 'Du hast schon drei 1er geschrieben.', icon: '🤓', condition: (p) => p.history.filter(h => h.type === 'grade' && h.value === 1).length >= 3 },
+  { id: '10_challenges', title: 'Herausforderer', description: 'Du hast 10 Daily Challenges geschafft.', icon: '⚔️', condition: (p) => p.history.filter(h => h.type === 'challenge').length >= 10 },
+  { id: 'first_schedule', title: 'Organisiert', description: 'Du hast ein Fach in deinen Stundenplan eingetragen.', icon: '📅', condition: (p) => Object.values(p.schedule).some((day: any) => day && day.length > 0) },
+  { id: 'rank_2', title: 'Aufsteiger', description: 'Du hast den zweiten Rang erreicht.', icon: '🚀', condition: (p) => p.points >= 500 },
+  { id: 'points_10k', title: 'Punktestand über 9000!', description: 'Du hast über 9000 Punkte gesammelt.', icon: '🔥', condition: (p) => p.points >= 9001 },
+];
 
 // --- Constants ---
 
@@ -585,7 +608,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="font-display font-bold text-lg leading-tight uppercase tracking-tight text-slate-900 dark:text-white transition-colors">
-                {activeTab === 'dashboard' ? 'Road to Success' : activeTab === 'schedule' ? 'Stundenplan' : 'Statistiken'}
+                {activeTab === 'dashboard' ? 'Road to Success' : activeTab === 'schedule' ? 'Stundenplan' : activeTab === 'stats' ? 'Statistiken' : 'Erfolge'}
               </h1>
               <p className="text-slate-400 dark:text-slate-500 text-xs font-semibold flex items-center gap-2">
                 {profile.gradeLevel} • {profile.name}
@@ -972,6 +995,54 @@ export default function App() {
               </div>
             </motion.div>
           )}
+
+          {activeTab === 'achievements' && (
+            <motion.div 
+              key="achievements"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-6"
+            >
+              <section className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {ACHIEVEMENTS.map((achievement) => {
+                  const unlocked = achievement.condition(profile);
+                  return (
+                    <div 
+                      key={achievement.id}
+                      className={`relative overflow-hidden p-6 rounded-3xl border-2 transition-all ${
+                        unlocked 
+                          ? 'bg-white dark:bg-slate-900 border-primary/20 shadow-lg shadow-primary/5' 
+                          : 'bg-slate-50 dark:bg-slate-800/50 border-slate-100 dark:border-slate-800 opacity-60 grayscale'
+                      }`}
+                    >
+                      <div className="flex items-start gap-4">
+                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-3xl shrink-0 ${unlocked ? 'bg-primary/10' : 'bg-slate-200 dark:bg-slate-800'}`}>
+                          {achievement.icon}
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="font-display font-bold text-slate-900 dark:text-white text-lg flex items-center gap-2">
+                            {achievement.title}
+                            {!unlocked && <Lock className="w-4 h-4 text-slate-400" />}
+                          </h4>
+                          <p className="text-sm font-medium text-slate-500 mt-1 leading-relaxed">
+                            {achievement.description}
+                          </p>
+                        </div>
+                      </div>
+                      {unlocked && (
+                        <motion.div 
+                          initial={{ opacity: 0, scale: 0 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          className="absolute -top-6 -right-6 w-24 h-24 bg-primary/5 rounded-full blur-2xl pointer-events-none"
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </section>
+            </motion.div>
+          )}
         </AnimatePresence>
       </main>
 
@@ -982,6 +1053,7 @@ export default function App() {
             { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
             { id: 'schedule', icon: Calendar, label: 'Plan' },
             { id: 'stats', icon: BarChart3, label: 'Stats' },
+            { id: 'achievements', icon: Medal, label: 'Erfolge' },
           ].map((tab) => (
             <button
               key={tab.id}
