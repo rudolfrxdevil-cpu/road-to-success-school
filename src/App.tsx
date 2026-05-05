@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Trophy, 
@@ -26,7 +26,9 @@ import {
   Clock,
   Moon,
   Sun,
-  Target
+  Target,
+  Maximize,
+  Minimize
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -213,6 +215,7 @@ export default function App() {
   const [authUsername, setAuthUsername] = useState<string | null>(() => localStorage.getItem('auth_username'));
 
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [isDark, setIsDark] = useState(() => {
     return localStorage.getItem('theme') === 'dark' || 
            (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -265,6 +268,29 @@ export default function App() {
       .finally(() => setIsSyncing(false));
     }
   }, [profile, authUsername]);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch((err) => {
+        console.error(`Error attempting to enable fullscreen: ${err.message}`);
+      });
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      }
+    }
+  };
 
   useEffect(() => {
     if (isDark) {
@@ -402,7 +428,7 @@ export default function App() {
 
 
   const availableSubjects = useMemo(() => {
-    const sched = Object.values(profile.schedule).flat().map(s => s.subject);
+    const sched = (Object.values(profile.schedule) as ScheduleSlot[][]).flat().map(s => s.subject);
     const hist = profile.history.filter(h => h.type === 'grade' && h.subject).map(h => h.subject!);
     return Array.from(new Set([...sched, ...hist])).filter(Boolean);
   }, [profile.schedule, profile.history]);
@@ -441,7 +467,7 @@ export default function App() {
         }
       }
     } else {
-      Object.entries(partSubjects).forEach(([subject, count]) => {
+      Object.entries(partSubjects).forEach(([subject, count]: [string, number]) => {
         if (count > 0) {
           for(let i=0; i<count; i++) {
              newEntries.push({
@@ -573,6 +599,13 @@ export default function App() {
               className="p-2 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-full transition-colors text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer"
             >
               {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </button>
+            <button 
+              onClick={toggleFullscreen}
+              className="p-2 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-full transition-colors text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer"
+              title="Vollbild umschalten"
+            >
+              {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
             </button>
             <button 
               id="settings-btn"
@@ -1051,7 +1084,7 @@ export default function App() {
                 
                 <button 
                   onClick={submitParticipation}
-                  disabled={partMode === 'subject' && (!todaySubjects.length || Object.values(partSubjects).reduce((a,b)=>a+b, 0) === 0)}
+                  disabled={partMode === 'subject' && (!todaySubjects.length || Object.values(partSubjects).reduce((a: number, b: number) => a + b, 0) === 0)}
                   className="w-full bg-primary text-white font-bold py-4 rounded-2xl shadow-xl shadow-primary/20 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-50 disabled:active:scale-100"
                 >
                   <span className="flex items-center justify-center gap-2">
