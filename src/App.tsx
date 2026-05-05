@@ -31,7 +31,8 @@ import {
   Minimize,
   Medal,
   Lock,
-  Flame
+  Flame,
+  Download
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -352,6 +353,7 @@ export default function App() {
   const [partSubjects, setPartSubjects] = useState<Record<string, number>>({});
   const [selectedSubject, setSelectedSubject] = useState("");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isApkModalOpen, setIsApkModalOpen] = useState(false);
   const [statsTimeFilter, setStatsTimeFilter] = useState<'week' | 'month' | 'halfyear' | 'all'>('all');
   const [isAddSlotOpen, setIsAddSlotOpen] = useState<{ open: boolean; day: number }>({ open: false, day: 0 });
   const [newSlot, setNewSlot] = useState({ subject: '', time: '' });
@@ -1413,7 +1415,14 @@ export default function App() {
                 >
                   Speichern
                 </button>
-                <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
+                <button 
+                  onClick={() => { setIsSettingsOpen(false); setIsApkModalOpen(true); }}
+                  className="w-full flex items-center justify-center gap-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold py-4 rounded-2xl shadow-xl active:scale-[0.98] transition-all cursor-pointer mt-3"
+                >
+                  <Download className="w-5 h-5" />
+                  App herunterladen (APK/PWA)
+                </button>
+                <div className="pt-4 mt-2 border-t border-slate-100 dark:border-slate-800">
                   <button 
                     onClick={() => { setIsSettingsOpen(false); logout(); }}
                     className="w-full text-danger font-bold py-3 rounded-2xl hover:bg-danger/10 transition-all cursor-pointer"
@@ -1421,6 +1430,68 @@ export default function App() {
                     Abmelden (@{authUsername})
                   </button>
                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {isApkModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsApkModalOpen(false)}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, y: 100, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 100, scale: 0.95 }}
+              className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="font-display font-bold text-xl dark:text-white flex items-center gap-2">
+                  <Download className="text-secondary w-6 h-6" />
+                  App installieren
+                </h3>
+                <button 
+                  onClick={() => setIsApkModalOpen(false)}
+                  className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4 text-slate-600 dark:text-slate-300">
+                <div className="bg-primary/5 border border-primary/20 p-4 rounded-2xl">
+                  <p className="text-sm font-semibold mb-2 text-primary">Direkter PWA-Download (Empfohlen)</p>
+                  <p className="text-sm">
+                    Du musst keine schwere APK herunterladen! Klassenheld funktioniert als <b>Progressive Web App (PWA)</b> und lässt sich wie eine native App nutzen.
+                  </p>
+                  <ul className="text-sm mt-3 space-y-2 list-disc list-inside">
+                    <li><b>Android (Chrome):</b> Tippe oben auf die 3 Punkte und wähle <span className="font-bold">„Zum Startbildschirm zufügen“</span> (oder „App installieren“).</li>
+                    <li><b>iOS (Safari):</b> Tippe unten auf den Teilen-Button und wähle <span className="font-bold">„Zum Home-Bildschirm“</span>.</li>
+                  </ul>
+                </div>
+
+                <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl">
+                  <p className="text-sm font-semibold mb-2">Echte APK erstellen</p>
+                  <p className="text-[13px]">
+                    Diese web-basierte Demo-Vorschau kann serverseitig keine APK-Datei kompilieren (dafür fehlen Java/Android Studio). 
+                    <br/><br/>
+                    Um selbst eine APK zu erstellen, exportiere diese App als ZIP und nutze Tools wie <a href="https://www.pwabuilder.com/" target="_blank" className="text-blue-500 underline">PWABuilder</a> oder <b>Capacitor/Cordova</b>, um dein Projekt lokal zu kompilieren.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-6">
+                <button 
+                  onClick={() => setIsApkModalOpen(false)}
+                  className="w-full bg-slate-900 dark:bg-slate-100 dark:text-slate-900 text-white font-bold py-4 rounded-2xl shadow-xl active:scale-[0.98] transition-all cursor-pointer"
+                >
+                  Verstanden
+                </button>
               </div>
             </motion.div>
           </div>
