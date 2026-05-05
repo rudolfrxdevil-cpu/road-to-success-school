@@ -32,7 +32,8 @@ import {
   Medal,
   Lock,
   Flame,
-  Download
+  Download,
+  BookOpen
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -74,6 +75,7 @@ interface UserProfile {
   lastLoginDate: number;
   history: HistoryEntry[];
   schedule: Record<number, ScheduleSlot[]>; // 0 = Mon, 1 = Tue, etc.
+  diary?: { id: string; date: number; text: string }[];
 }
 
 type Tab = 'dashboard' | 'schedule' | 'stats' | 'achievements';
@@ -187,7 +189,8 @@ function AuthScreen({ onAuth }: { onAuth: (username: string, profile: UserProfil
                 streak: 0,
                 lastLoginDate: 0,
                 history: [],
-                schedule: { 0: [], 1: [], 2: [], 3: [], 4: [] }
+                schedule: { 0: [], 1: [], 2: [], 3: [], 4: [] },
+                diary: []
               }
             };
             localStorage.setItem('kh_users', JSON.stringify(localUsers));
@@ -304,6 +307,7 @@ export default function App() {
       if (!parsed.schedule) parsed.schedule = { 0: [], 1: [], 2: [], 3: [], 4: [] };
       if (typeof parsed.streak !== 'number') parsed.streak = 0;
       if (typeof parsed.lastLoginDate !== 'number') parsed.lastLoginDate = 0;
+      if (!parsed.diary) parsed.diary = [];
       return parsed;
     }
     return {
@@ -313,7 +317,8 @@ export default function App() {
       streak: 0,
       lastLoginDate: 0,
       history: [],
-      schedule: { 0: [], 1: [], 2: [], 3: [], 4: [] }
+      schedule: { 0: [], 1: [], 2: [], 3: [], 4: [] },
+      diary: []
     };
   });
 
@@ -354,6 +359,8 @@ export default function App() {
   const [selectedSubject, setSelectedSubject] = useState("");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isApkModalOpen, setIsApkModalOpen] = useState(false);
+  const [isDiaryOpen, setIsDiaryOpen] = useState(false);
+  const [diaryText, setDiaryText] = useState("");
   const [statsTimeFilter, setStatsTimeFilter] = useState<'week' | 'month' | 'halfyear' | 'all'>('all');
   const [isAddSlotOpen, setIsAddSlotOpen] = useState<{ open: boolean; day: number }>({ open: false, day: 0 });
   const [newSlot, setNewSlot] = useState({ subject: '', time: '' });
@@ -651,6 +658,22 @@ export default function App() {
     setIsSettingsOpen(false);
   };
 
+  const addDiaryEntry = () => {
+    if (!diaryText.trim()) return;
+    setProfile(prev => ({
+      ...prev,
+      diary: [
+        {
+          id: Math.random().toString(36).substr(2, 9),
+          date: Date.now(),
+          text: diaryText.trim()
+        },
+        ...(prev.diary || [])
+      ]
+    }));
+    setDiaryText("");
+  };
+
   const addScheduleSlot = () => {
     if (!newSlot.subject) return;
     
@@ -804,31 +827,50 @@ export default function App() {
               </section>
 
               {/* Action Buttons */}
-              <section className="grid grid-cols-2 gap-4" id="actions">
-                <motion.button 
-                  whileTap={{ scale: 0.95 }}
-                  onClick={openPartModal}
-                  className="flex flex-col items-center justify-center p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-md transition-all group cursor-pointer"
-                  id="participation-btn"
-                >
-                  <div className="w-16 h-16 bg-blue-50 dark:bg-blue-500/10 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                    <Hand className="text-blue-500 w-8 h-8" />
-                  </div>
-                  <span className="font-display font-bold text-slate-900 dark:text-white transition-colors">Gemeldet</span>
-                  <span className="text-xs text-blue-500 font-bold mt-1">+{PARTICIPATION_POINTS} Punkte</span>
-                </motion.button>
+              <section className="space-y-4" id="actions">
+                <div className="grid grid-cols-2 gap-4">
+                  <motion.button 
+                    whileTap={{ scale: 0.95 }}
+                    onClick={openPartModal}
+                    className="flex flex-col items-center justify-center p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-md transition-all group cursor-pointer"
+                    id="participation-btn"
+                  >
+                    <div className="w-16 h-16 bg-blue-50 dark:bg-blue-500/10 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                      <Hand className="text-blue-500 w-8 h-8" />
+                    </div>
+                    <span className="font-display font-bold text-slate-900 dark:text-white transition-colors">Gemeldet</span>
+                    <span className="text-xs text-blue-500 font-bold mt-1">+{PARTICIPATION_POINTS} Punkte</span>
+                  </motion.button>
 
-                <motion.button 
+                  <motion.button 
+                    whileTap={{ scale: 0.95 }}
+                    onClick={openGradeModal}
+                    className="flex flex-col items-center justify-center p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-md transition-all group cursor-pointer"
+                    id="grade-btn"
+                  >
+                    <div className="w-16 h-16 bg-green-50 dark:bg-green-500/10 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                      <GraduationCap className="text-green-500 w-8 h-8" />
+                    </div>
+                    <span className="font-display font-bold text-slate-900 dark:text-white transition-colors">Arbeit/Test</span>
+                    <span className="text-xs text-green-500 font-bold mt-1">Bonuspunkte</span>
+                  </motion.button>
+                </div>
+                
+                <motion.button
                   whileTap={{ scale: 0.95 }}
-                  onClick={openGradeModal}
-                  className="flex flex-col items-center justify-center p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-md transition-all group cursor-pointer"
-                  id="grade-btn"
+                  onClick={() => setIsDiaryOpen(true)}
+                  className="w-full flex items-center justify-between p-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-md transition-all group cursor-pointer"
                 >
-                  <div className="w-16 h-16 bg-green-50 dark:bg-green-500/10 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                    <GraduationCap className="text-green-500 w-8 h-8" />
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-purple-50 dark:bg-purple-500/10 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                      <BookOpen className="text-purple-500 w-6 h-6" />
+                    </div>
+                    <div className="text-left">
+                      <span className="block font-display font-bold text-slate-900 dark:text-white transition-colors">Tagebuch</span>
+                      <span className="text-xs text-purple-500 font-bold mt-0.5">Wie war dein Tag?</span>
+                    </div>
                   </div>
-                  <span className="font-display font-bold text-slate-900 dark:text-white transition-colors">Arbeit/Test</span>
-                  <span className="text-xs text-green-500 font-bold mt-1">Bonuspunkte</span>
+                  <ChevronRight className="w-5 h-5 text-slate-400 group-hover:translate-x-1 transition-transform" />
                 </motion.button>
               </section>
 
@@ -1491,6 +1533,71 @@ export default function App() {
                   className="w-full bg-slate-900 dark:bg-slate-100 dark:text-slate-900 text-white font-bold py-4 rounded-2xl shadow-xl active:scale-[0.98] transition-all cursor-pointer"
                 >
                   Verstanden
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {isDiaryOpen && (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsDiaryOpen(false)}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, y: 100, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 100, scale: 0.95 }}
+              className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl flex flex-col max-h-[80vh]"
+            >
+              <div className="flex justify-between items-center mb-6 shrink-0">
+                <h3 className="font-display font-bold text-xl dark:text-white flex items-center gap-2">
+                  <BookOpen className="text-purple-500 w-6 h-6" />
+                  Mein Tagebuch
+                </h3>
+                <button 
+                  onClick={() => setIsDiaryOpen(false)}
+                  className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto min-h-0 space-y-4 mb-4 pr-1">
+                {profile.diary && profile.diary.length > 0 ? (
+                  profile.diary.map(entry => (
+                    <div key={entry.id} className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl">
+                      <div className="text-xs font-bold text-slate-400 dark:text-slate-500 mb-2">
+                        {new Date(entry.date).toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' })}
+                      </div>
+                      <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{entry.text}</p>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-center py-8 text-slate-400 dark:text-slate-500">
+                    <BookOpen className="w-12 h-12 mx-auto mb-3 opacity-20" />
+                    <p>Noch keine Einträge vorhanden.</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="shrink-0 space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800">
+                <textarea
+                  value={diaryText}
+                  onChange={(e) => setDiaryText(e.target.value)}
+                  placeholder="Wie war dein Tag heute?"
+                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 dark:text-white border-none rounded-2xl text-sm outline-none resize-none h-24 transition-all"
+                />
+                <button 
+                  onClick={addDiaryEntry}
+                  disabled={!diaryText.trim()}
+                  className="w-full bg-purple-500 hover:bg-purple-600 disabled:opacity-50 text-white font-bold py-4 rounded-2xl shadow-xl active:scale-[0.98] transition-all cursor-pointer"
+                >
+                  Eintrag speichern
                 </button>
               </div>
             </motion.div>

@@ -55,7 +55,8 @@ async function startServer() {
           streak: 0,
           lastLoginDate: 0,
           history: [],
-          schedule: { 0: [], 1: [], 2: [], 3: [], 4: [] }
+          schedule: { 0: [], 1: [], 2: [], 3: [], 4: [] },
+          diary: []
         }
       };
       await writeDB(db);
