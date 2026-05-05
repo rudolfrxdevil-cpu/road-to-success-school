@@ -7,7 +7,7 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DB_FILE = path.join(__dirname, "db.json");
+const DB_FILE = process.env.NODE_ENV === "production" ? "/tmp/db.json" : path.join(__dirname, "db.json");
 
 // Simple in-memory / file db
 async function readDB() {
@@ -20,7 +20,11 @@ async function readDB() {
 }
 
 async function writeDB(data: any) {
-  await fs.writeFile(DB_FILE, JSON.stringify(data, null, 2));
+  try {
+    await fs.writeFile(DB_FILE, JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.error("Failed to write DB", e);
+  }
 }
 
 async function startServer() {
@@ -31,53 +35,68 @@ async function startServer() {
 
   // APIs
   app.post("/api/auth/register", async (req, res) => {
-    const { username, password } = req.body;
-    if (!username || !password) {
-      return res.status(400).json({ error: "Username und Passwort werden benötigt" });
-    }
-    const db = await readDB();
-    if (db.users[username]) {
-      return res.status(400).json({ error: "Benutzername bereits vergeben" });
-    }
-    
-    // Create new user (clear text password for simplicity since no hashing lib installed)
-    db.users[username] = {
-      password,
-      profile: {
-        name: username,
-        gradeLevel: "10b",
-        points: 0,
-        history: [],
-        schedule: { 0: [], 1: [], 2: [], 3: [], 4: [] }
+    try {
+      const { username, password } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ error: "Username und Passwort werden benötigt" });
       }
-    };
-    await writeDB(db);
-    
-    res.json({ success: true, profile: db.users[username].profile });
+      const db = await readDB();
+      if (db.users[username]) {
+        return res.status(400).json({ error: "Benutzername bereits vergeben" });
+      }
+      
+      // Create new user
+      db.users[username] = {
+        password,
+        profile: {
+          name: username,
+          gradeLevel: "10b",
+          points: 0,
+          history: [],
+          schedule: { 0: [], 1: [], 2: [], 3: [], 4: [] }
+        }
+      };
+      await writeDB(db);
+      
+      res.json({ success: true, profile: db.users[username].profile });
+    } catch (error: any) {
+      console.error(error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
   });
 
   app.post("/api/auth/login", async (req, res) => {
-    const { username, password } = req.body;
-    const db = await readDB();
-    const user = db.users[username];
-    if (!user || user.password !== password) {
-      return res.status(401).json({ error: "Falscher Benutzername oder Passwort" });
+    try {
+      const { username, password } = req.body;
+      const db = await readDB();
+      const user = db.users[username];
+      if (!user || user.password !== password) {
+        return res.status(401).json({ error: "Falscher Benutzername oder Passwort" });
+      }
+      res.json({ success: true, profile: user.profile });
+    } catch (error: any) {
+      console.error(error);
+      res.status(500).json({ error: "Internal Server Error" });
     }
-    res.json({ success: true, profile: user.profile });
   });
 
   app.post("/api/profile", async (req, res) => {
-    const { username, profile } = req.body;
-    if (!username || !profile) {
-      return res.status(400).json({ error: "Missing data" });
+    try {
+      const { username, profile } = req.body;
+      if (!username || !profile) {
+        return res.status(400).json({ error: "Missing data" });
+      }
+      const db = await readDB();
+      if (!db.users[username]) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      db.users[username].profile = profile;
+      await writeDB(db);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error(error);
+      res.status(500).json({ error: "Internal Server Error" });
     }
-    const db = await readDB();
-    if (!db.users[username]) {
-      return res.status(404).json({ error: "User not found" });
-    }
-    db.users[username].profile = profile;
-    await writeDB(db);
-    res.json({ success: true });
   });
 
   // Vite middleware for development
