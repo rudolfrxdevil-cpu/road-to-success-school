@@ -140,15 +140,59 @@ function AuthScreen({ onAuth }: { onAuth: (username: string, profile: UserProfil
 
     const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
     try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ username, password })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Fehler aufgetreten');
+      let res;
+      try {
+        res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+      } catch (e) {
+        // Network error (offline or server not available)
+        res = null;
+      }
+
+      let data;
+      let isFallback = false;
+
+      if (res) {
+        const text = await res.text();
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          isFallback = true;
+        }
+      } else {
+        isFallback = true;
+      }
+
+      if (isFallback) {
+         // LocalStorage Fallback for static deployments (e.g. Netlify)
+         const localUsers = JSON.parse(localStorage.getItem('kh_users') || '{}');
+         if (isRegister) {
+            if (localUsers[username]) throw new Error('Benutzername bereits vergeben');
+            localUsers[username] = {
+              password,
+              profile: {
+                name: username,
+                gradeLevel: "10b",
+                points: 0,
+                history: [],
+                schedule: { 0: [], 1: [], 2: [], 3: [], 4: [] }
+              }
+            };
+            localStorage.setItem('kh_users', JSON.stringify(localUsers));
+            data = { profile: localUsers[username].profile };
+         } else {
+            const user = localUsers[username];
+            if (!user || user.password !== password) {
+               throw new Error('Falscher Benutzername oder Passwort');
+            }
+            data = { profile: user.profile };
+         }
+      } else {
+         if (!res!.ok) throw new Error(data.error || 'Fehler aufgetreten');
+      }
       
       onAuth(username, data.profile);
     } catch (err: any) {
@@ -287,7 +331,27 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: authUsername, profile })
       })
-      .catch(console.error)
+      .then(async (res) => {
+         const text = await res.text();
+         try {
+            JSON.parse(text);
+         } catch(e) {
+            // HTML response = static hosting fallback
+            const localUsers = JSON.parse(localStorage.getItem('kh_users') || '{}');
+            if (localUsers[authUsername]) {
+               localUsers[authUsername].profile = profile;
+               localStorage.setItem('kh_users', JSON.stringify(localUsers));
+            }
+         }
+      })
+      .catch((e) => {
+         console.error("API error, falling back locally", e);
+         const localUsers = JSON.parse(localStorage.getItem('kh_users') || '{}');
+         if (localUsers[authUsername]) {
+            localUsers[authUsername].profile = profile;
+            localStorage.setItem('kh_users', JSON.stringify(localUsers));
+         }
+      })
       .finally(() => setIsSyncing(false));
     }
   }, [profile, authUsername]);
