@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import confetti from 'canvas-confetti';
 import { 
   Trophy, 
   Hand, 
@@ -77,6 +78,7 @@ interface UserProfile {
   schedule: Record<number, ScheduleSlot[]>; // 0 = Mon, 1 = Tue, etc.
   diary?: { id: string; date: number; text: string }[];
   estimatedGrades?: Record<string, number>;
+  unlockedAchievements?: string[];
 }
 
 type Tab = 'dashboard' | 'schedule' | 'stats' | 'achievements';
@@ -424,6 +426,18 @@ export default function App() {
   const [tempGrade, setTempGrade] = useState(profile.gradeLevel);
 
   const [isSyncing, setIsSyncing] = useState(false);
+  const [celebrationInfo, setCelebrationInfo] = useState<{title: string, subtitle?: string} | null>(null);
+
+  const triggerCelebration = (title: string, subtitle?: string) => {
+    setCelebrationInfo({ title, subtitle });
+    confetti({
+      particleCount: 200,
+      spread: 120,
+      origin: { y: 0.6 },
+      colors: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6']
+    });
+    setTimeout(() => setCelebrationInfo(null), 3500);
+  };
 
   useEffect(() => {
     localStorage.setItem('klassenheld_profile', JSON.stringify(profile));
@@ -640,6 +654,27 @@ export default function App() {
     }
   }, [dailyChallenges]);
 
+  useEffect(() => {
+    let newUnlocked: string[] = [];
+    ACHIEVEMENTS.forEach(ach => {
+      const isUnlocked = ach.condition(profile);
+      if (isUnlocked && (!profile.unlockedAchievements || !profile.unlockedAchievements.includes(ach.id))) {
+        newUnlocked.push(ach.id);
+      }
+    });
+
+    if (newUnlocked.length > 0) {
+      setProfile(prev => ({
+        ...prev,
+        unlockedAchievements: [...(prev.unlockedAchievements || []), ...newUnlocked]
+      }));
+      const ach = ACHIEVEMENTS.find(a => a.id === newUnlocked[0]);
+      if (ach) {
+        triggerCelebration('Stark!', `Erfolg freigeschaltet: ${ach.title}`);
+      }
+    }
+  }, [profile.history, profile.points, profile.streak, profile.schedule, profile.diary, profile.estimatedGrades]);
+
 
   const availableSubjects = useMemo(() => {
     const sched = (Object.values(profile.schedule) as ScheduleSlot[][]).flat().map(s => s.subject);
@@ -704,6 +739,9 @@ export default function App() {
          points: prev.points + earnedPoints,
          history: [...newEntries, ...prev.history].slice(0, 50)
        }));
+       if (newEntries.length >= 3) {
+           triggerCelebration('Klasse!', `${newEntries.length} Meldungen eingetragen.`);
+       }
     }
     
     setIsPartModalOpen(false);
@@ -726,6 +764,13 @@ export default function App() {
       points: Math.max(0, prev.points + points),
       history: [entry, ...prev.history].slice(0, 50)
     }));
+
+    if (grade === 1) {
+      triggerCelebration('Super Note!', 'Eine Eins! Wahnsinn!');
+    } else if (grade === 2) {
+      triggerCelebration('Toll!', 'Eine Zwei! Sehr gut gemacht.');
+    }
+
     setIsGradeModalOpen(false);
     setSelectedSubject("");
   };
@@ -1977,6 +2022,36 @@ export default function App() {
             </motion.div>
           );
         })()}
+      </AnimatePresence>
+
+      {/* Celebration Overlay */}
+      <AnimatePresence>
+        {celebrationInfo && (
+          <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center pointer-events-none p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.5, y: 50 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 1.1, y: -20 }}
+              className="bg-white/90 dark:bg-slate-900/95 p-8 rounded-[3rem] shadow-2xl backdrop-blur-xl flex flex-col items-center border border-white/20 dark:border-slate-700 max-w-sm w-full text-center"
+            >
+              <motion.span 
+                animate={{ rotate: [-10, 10, -10, 10, 0], scale: [1, 1.2, 1] }} 
+                transition={{ duration: 0.8, repeat: Infinity, repeatType: 'reverse' }}
+                className="text-7xl mb-6 shadow-sm"
+              >
+                🌟
+              </motion.span>
+              <h2 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-orange-500 via-pink-500 to-blue-500 uppercase tracking-tighter leading-tight">
+                {celebrationInfo.title}
+              </h2>
+              {celebrationInfo.subtitle && (
+                <p className="mt-3 text-lg font-bold text-slate-600 dark:text-slate-300">
+                  {celebrationInfo.subtitle}
+                </p>
+              )}
+            </motion.div>
+          </div>
+        )}
       </AnimatePresence>
     </div>
   );
