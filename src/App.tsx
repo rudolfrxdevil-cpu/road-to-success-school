@@ -416,6 +416,7 @@ export default function App() {
   const [tempEstGrade, setTempEstGrade] = useState<number>(3);
   const [diaryText, setDiaryText] = useState("");
   const [statsTimeFilter, setStatsTimeFilter] = useState<'week' | 'month' | 'halfyear' | 'all'>('all');
+  const [bestSubjectsSort, setBestSubjectsSort] = useState<'trend' | 'participations' | 'grades' | 'points'>('trend');
   const [isAddSlotOpen, setIsAddSlotOpen] = useState<{ open: boolean; day: number }>({ open: false, day: 0 });
   const [newSlot, setNewSlot] = useState({ subject: '', time: '' });
   
@@ -566,6 +567,28 @@ export default function App() {
        };
     });
   }, [profile.history, statsTimeFilter]);
+
+  const bestSubjects = useMemo(() => {
+    const subjects = getAvailableSubjects(profile);
+    const data = subjects.map(subject => {
+      const subjectHistory = profile.history.filter(h => h.subject === subject);
+      const participations = subjectHistory.filter(h => h.type === 'participation').length;
+      const gradesCount = subjectHistory.filter(h => h.type === 'grade').length;
+      const points = subjectHistory.reduce((sum, h) => sum + (h.points || 0), 0);
+      const baseGrade = profile.estimatedGrades?.[subject] || 3.0;
+      const trend = getTrendGrade(subject, baseGrade, profile.history);
+      
+      return { subject, participations, gradesCount, points, trend };
+    });
+
+    return data.sort((a, b) => {
+      if (bestSubjectsSort === 'trend') return a.trend - b.trend; // lower is better
+      if (bestSubjectsSort === 'participations') return b.participations - a.participations;
+      if (bestSubjectsSort === 'grades') return b.gradesCount - a.gradesCount;
+      if (bestSubjectsSort === 'points') return b.points - a.points;
+      return 0;
+    });
+  }, [profile, bestSubjectsSort]);
 
   // Daily Challenges Logic
   const dailyChallenges = useMemo(() => {
@@ -1218,6 +1241,70 @@ export default function App() {
                 <div className="card p-5 space-y-2">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total Punkte</span>
                   <p className="text-2xl font-display font-bold text-primary">{profile.points}</p>
+                </div>
+              </section>
+
+              {/* Beste Fächer Liste */}
+              <section className="card p-4 space-y-4">
+                <div className="flex flex-col space-y-3">
+                  <div>
+                    <h3 className="font-display font-bold text-slate-800 dark:text-slate-200 mb-1">Beste Fächer</h3>
+                    <p className="text-xs text-slate-400 font-bold uppercase tracking-widest italic">Deine Top-Fächer im Überblick</p>
+                  </div>
+                  
+                  <div className="flex bg-slate-100 dark:bg-slate-800 rounded-xl p-1 gap-1 overflow-x-auto select-none no-scrollbar">
+                    {[
+                      { id: 'trend', label: 'Prognose', icon: TrendingUp },
+                      { id: 'participations', label: 'Meldungen', icon: Hand },
+                      { id: 'grades', label: 'Arbeiten', icon: GraduationCap },
+                      { id: 'points', label: 'Punkte', icon: Trophy }
+                    ].map(sort => (
+                      <button
+                        key={sort.id}
+                        onClick={() => setBestSubjectsSort(sort.id as any)}
+                        className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap
+                          ${bestSubjectsSort === sort.id 
+                            ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' 
+                            : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'
+                          }`}
+                      >
+                        <sort.icon className="w-3.5 h-3.5" />
+                        {sort.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-3 mt-2">
+                  {bestSubjects.length > 0 ? bestSubjects.map((subj, idx) => (
+                    <div key={subj.subject} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${
+                          idx === 0 ? 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30' : 
+                          idx === 1 ? 'bg-slate-200 text-slate-600 dark:bg-slate-700' : 
+                          idx === 2 ? 'bg-orange-100 text-orange-600 dark:bg-orange-900/30' :
+                          'bg-white dark:bg-slate-900 text-slate-400 shadow-sm'
+                        }`}>
+                          {idx + 1}
+                        </div>
+                        <div>
+                          <p className="font-bold text-slate-900 dark:text-white text-sm">{subj.subject}</p>
+                          <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 mt-0.5">
+                            <span className="flex items-center gap-0.5"><Hand className="w-3 h-3 text-blue-500" /> {subj.participations}</span>
+                            <span className="flex items-center gap-0.5"><GraduationCap className="w-3 h-3 text-green-500" /> {subj.gradesCount}</span>
+                            <span className="flex items-center gap-0.5"><Trophy className="w-3 h-3 text-yellow-500" /> {subj.points}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-display font-bold text-lg" style={{ color: subj.trend <= 2.5 ? '#10b981' : subj.trend <= 4.0 ? '#f59e0b' : '#ef4444' }}>
+                          {subj.trend.toFixed(1)}
+                        </p>
+                      </div>
+                    </div>
+                  )) : (
+                    <p className="text-sm text-slate-500 text-center py-4 italic">Noch keine Fächer vorhanden.</p>
+                  )}
                 </div>
               </section>
 
