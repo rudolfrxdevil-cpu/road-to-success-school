@@ -1075,7 +1075,7 @@ export default function App() {
                               </div>
                             </div>
                             <button 
-                              onClick={() => deleteScheduleSlot(dayIndex, slot.id)}
+                              onClick={(e) => { e.stopPropagation(); deleteScheduleSlot(dayIndex, slot.id); }}
                               className="opacity-0 group-hover:opacity-100 p-2 text-slate-300 dark:text-slate-600 hover:text-danger hover:bg-danger/10 rounded-full transition-all cursor-pointer"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -1786,7 +1786,7 @@ export default function App() {
           const trend = getTrendGrade(subjectDetails, baseGrade, profile.history);
 
           return (
-            <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+            <motion.div key="subjectDetails" className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
               <motion.div 
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -1887,7 +1887,7 @@ export default function App() {
                   </div>
                 </div>
               </motion.div>
-            </div>
+            </motion.div>
           );
         })()}
       </AnimatePresence>
