@@ -131,7 +131,7 @@ const ACHIEVEMENTS: Achievement[] = [
   { id: '200_participations', title: 'Radio-Moderator', description: 'Unglaubliche 200 Meldungen. Respekt!', icon: '🎙️', condition: (p) => p.history.filter(h => h.type === 'participation').length >= 200 },
   { id: 'first_grade_1', title: 'Musterschüler', description: 'Du hast deine erste 1 geschrieben.', icon: '🌟', condition: (p) => p.history.some(h => h.type === 'grade' && h.value === 1) },
   { id: '3_grades_1', title: 'Streber', description: 'Du hast schon drei 1er geschrieben.', icon: '🤓', condition: (p) => p.history.filter(h => h.type === 'grade' && h.value === 1).length >= 3 },
-  { id: 'first_grade_improve', title: 'Comeback', description: 'Eine 3 oder besser geschrieben.', icon: '📈', condition: (p) => p.history.some(h => h.type === 'grade' && h.value !== undefined && h.value <= 3) },
+  { id: 'first_grade_improve', title: 'Comeback', description: 'Eine 3 oder besser geschrieben.', icon: '📈', condition: (p) => p.history.some(h => h.type === 'grade' && h.value !== undefined && Number(h.value) <= 3) },
   { id: '10_challenges', title: 'Herausforderer', description: 'Du hast 10 Daily Challenges geschafft.', icon: '⚔️', condition: (p) => p.history.filter(h => h.type === 'challenge').length >= 10 },
   { id: '50_challenges', title: 'Challenge-Meister', description: 'Du hast 50 Daily Challenges gemeistert!', icon: '🎯', condition: (p) => p.history.filter(h => h.type === 'challenge').length >= 50 },
   { id: 'first_schedule', title: 'Organisiert', description: 'Du hast ein Fach in deinen Stundenplan eingetragen.', icon: '📅', condition: (p) => Object.values(p.schedule).some((day: any) => day && day.length > 0) },
@@ -411,6 +411,7 @@ export default function App() {
   const [isApkModalOpen, setIsApkModalOpen] = useState(false);
   const [isDiaryOpen, setIsDiaryOpen] = useState(false);
   const [isGradesOpen, setIsGradesOpen] = useState(false);
+  const [subjectDetails, setSubjectDetails] = useState<string | null>(null);
   const [editingSubject, setEditingSubject] = useState<string | null>(null);
   const [tempEstGrade, setTempEstGrade] = useState<number>(3);
   const [diaryText, setDiaryText] = useState("");
@@ -1059,7 +1060,11 @@ export default function App() {
                         <p className="text-xs text-slate-400 font-medium italic pl-4">Keine Fächer eingetragen</p>
                       ) : (
                         profile.schedule[dayIndex].map((slot) => (
-                          <div key={slot.id} className="flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/50 p-3 rounded-2xl border border-slate-100 dark:border-slate-800 group">
+                          <div 
+                            key={slot.id} 
+                            onClick={() => setSubjectDetails(slot.subject)}
+                            className="flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/50 p-3 rounded-2xl border border-slate-100 dark:border-slate-800 group cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors"
+                          >
                             <div className="flex items-center gap-3">
                               <div className="w-8 h-8 bg-white dark:bg-slate-900 rounded-lg flex items-center justify-center shadow-sm">
                                 <Clock className="w-4 h-4 text-slate-400 dark:text-slate-500" />
@@ -1771,6 +1776,120 @@ export default function App() {
             </motion.div>
           </div>
         )}
+
+        {subjectDetails && (() => {
+          const subjectHistory = profile.history.filter(h => h.subject === subjectDetails);
+          const participations = subjectHistory.filter(h => h.type === 'participation');
+          const grades = subjectHistory.filter(h => h.type === 'grade');
+          const pointsInSubject = subjectHistory.reduce((sum, h) => sum + (h.points || 0), 0);
+          const baseGrade = profile.estimatedGrades?.[subjectDetails] || 3.0;
+          const trend = getTrendGrade(subjectDetails, baseGrade, profile.history);
+
+          return (
+            <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setSubjectDetails(null)}
+                className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+              />
+              <motion.div 
+                initial={{ opacity: 0, y: 100, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 100, scale: 0.95 }}
+                className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl flex flex-col max-h-[85vh]"
+              >
+                <div className="flex justify-between items-center mb-6 shrink-0 border-b border-slate-100 dark:border-slate-800 pb-4">
+                  <div>
+                    <h3 className="font-display font-bold text-2xl dark:text-white flex items-center gap-2">
+                      <BookOpen className="text-blue-500 w-6 h-6" />
+                      {subjectDetails}
+                    </h3>
+                    <p className="text-xs text-slate-500 font-semibold mt-1">Fach-Details und Statistiken</p>
+                  </div>
+                  <button 
+                    onClick={() => setSubjectDetails(null)}
+                    className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto min-h-0 space-y-6 pr-2">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-orange-50 dark:bg-orange-500/10 p-4 rounded-3xl border border-orange-100 dark:border-orange-500/20">
+                      <p className="text-orange-500 text-xs font-bold uppercase tracking-wider mb-1 flex items-center gap-1">
+                        <TrendingUp className="w-4 h-4" /> Prognose
+                      </p>
+                      <p className="font-display font-bold text-3xl" style={{ color: trend <= 2.5 ? '#10b981' : trend <= 4.0 ? '#f59e0b' : '#ef4444' }}>
+                        {trend.toFixed(1)}
+                      </p>
+                    </div>
+                    <div className="bg-yellow-50 dark:bg-yellow-500/10 p-4 rounded-3xl border border-yellow-100 dark:border-yellow-500/20">
+                      <p className="text-yellow-600 dark:text-yellow-500 text-xs font-bold uppercase tracking-wider mb-1 flex items-center gap-1">
+                        <Trophy className="w-4 h-4" /> Punkte
+                      </p>
+                      <p className="font-display font-bold text-3xl text-yellow-600 dark:text-yellow-500">
+                        {pointsInSubject}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 dark:bg-slate-800 p-5 rounded-3xl border border-slate-100 dark:border-slate-700">
+                    <h4 className="font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-4">
+                      <Hand className="w-5 h-5 text-blue-500" />
+                      Meldungen ({participations.length})
+                    </h4>
+                    {participations.length > 0 ? (
+                      <div className="space-y-3">
+                        {participations.slice().reverse().slice(0, 5).map(p => (
+                          <div key={p.id} className="flex justify-between items-center text-sm border-b border-slate-200 dark:border-slate-700 pb-2 last:border-0 last:pb-0">
+                            <span className="text-slate-600 dark:text-slate-300">
+                              {new Date(p.date).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: '2-digit' })}
+                            </span>
+                            <span className="font-bold text-blue-500">+{p.points} Pkt</span>
+                          </div>
+                        ))}
+                        {participations.length > 5 && (
+                          <p className="text-xs text-center text-slate-400 font-medium italic pt-2">
+                            +{participations.length - 5} weitere Meldungen
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-slate-500 italic">Noch keine Meldungen in diesem Fach.</p>
+                    )}
+                  </div>
+
+                  <div className="bg-slate-50 dark:bg-slate-800 p-5 rounded-3xl border border-slate-100 dark:border-slate-700">
+                    <h4 className="font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-4">
+                      <GraduationCap className="w-5 h-5 text-green-500" />
+                      Noten / Arbeiten ({grades.length})
+                    </h4>
+                    {grades.length > 0 ? (
+                      <div className="space-y-3">
+                        {grades.slice().reverse().map(g => (
+                          <div key={g.id} className="flex justify-between items-center text-sm border-b border-slate-200 dark:border-slate-700 pb-2 last:border-0 last:pb-0">
+                            <div className="flex flex-col">
+                              <span className="font-bold text-slate-900 dark:text-white">Note {g.value}</span>
+                              <span className="text-xs text-slate-500">
+                                {new Date(g.date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' })}
+                              </span>
+                            </div>
+                            <span className="font-bold text-green-500">+{g.points} Pkt</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-slate-500 italic">Noch keine Noten in diesem Fach eingetragen.</p>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+          );
+        })()}
       </AnimatePresence>
     </div>
   );
