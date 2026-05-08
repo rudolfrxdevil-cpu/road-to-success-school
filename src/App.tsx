@@ -111,11 +111,19 @@ const getTrendGrade = (subject: string, baseGrade: number, history: HistoryEntry
   
   let grade = baseGrade;
   
-  // Tests heavily weight the grade
-  if (examGrades.length > 0) {
-    const examAvg = examGrades.reduce((sum, h) => sum + (Number(h.value) || 0), 0) / examGrades.length;
-    // 60% exam grade, 40% initial estimation
-    grade = (baseGrade * 0.4) + (examAvg * 0.6); 
+  // Sort exams by date ascending to apply them progressively
+  const sortedExams = [...examGrades].sort((a, b) => a.date - b.date);
+  
+  for (const h of sortedExams) {
+    const type = h.comment || 'arbeit';
+    const factor = type === 'vokabeltest' ? 0.125 : type === 'test' ? 0.25 : 0.75;
+    const diff = grade - Number(h.value);
+    
+    // Eine 1 (bei baseGrade 3) bringt:
+    // Vokabeltest (diff=2): 2 * 0.125 = 0.25
+    // Test (diff=2): 2 * 0.25 = 0.5
+    // Arbeit (diff=2): 2 * 0.75 = 1.5
+    grade = grade - (diff * factor);
   }
   
   // Participations improve it slightly (subtract 0.05 per participation)
@@ -404,6 +412,7 @@ export default function App() {
   }, [authUsername]);
 
   const [isGradeModalOpen, setIsGradeModalOpen] = useState(false);
+  const [gradeType, setGradeType] = useState<'vokabeltest' | 'test' | 'arbeit'>('arbeit');
   const [isPartModalOpen, setIsPartModalOpen] = useState(false);
   const [partMode, setPartMode] = useState<'total' | 'subject'>('total');
   const [partTotal, setPartTotal] = useState<number>(1);
@@ -464,7 +473,9 @@ export default function App() {
          }
       })
       .catch((e) => {
-         console.error("API error, falling back locally", e);
+         if (e.message !== "Failed to fetch") {
+           console.error("API error, falling back locally", e);
+         }
          const localUsers = JSON.parse(localStorage.getItem('kh_users') || '{}');
          if (localUsers[authUsername]) {
             localUsers[authUsername].profile = profile;
@@ -749,14 +760,16 @@ export default function App() {
 
   const addGradeResult = (grade: Grade) => {
     if (!selectedSubject) return;
-    const points = GRADE_POINTS[grade];
+    const multiplier = gradeType === 'vokabeltest' ? 0.2 : gradeType === 'test' ? 0.5 : 1;
+    const points = Math.round(GRADE_POINTS[grade] * multiplier);
     const entry: HistoryEntry = {
       id: Math.random().toString(36).substr(2, 9),
       type: 'grade',
       value: grade,
       points: points,
       date: Date.now(),
-      subject: selectedSubject
+      subject: selectedSubject,
+      comment: gradeType
     };
 
     setProfile(prev => ({
@@ -841,6 +854,7 @@ export default function App() {
   const openGradeModal = () => {
     setIsGradeModalOpen(true);
     setSelectedSubject(""); // Reset selection
+    setGradeType('arbeit');
   };
   
   const handleAuth = (username: string, returnedProfile: UserProfile) => {
@@ -1561,6 +1575,12 @@ export default function App() {
               </div>
 
               <div className="space-y-6">
+                <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl mb-6">
+                  <button onClick={() => setGradeType('vokabeltest')} className={`flex-1 py-3 px-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-widest rounded-xl transition-all ${gradeType === 'vokabeltest' ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-400 dark:text-slate-500'}`}>Vokabeltest</button>
+                  <button onClick={() => setGradeType('test')} className={`flex-1 py-3 px-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-widest rounded-xl transition-all ${gradeType === 'test' ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-400 dark:text-slate-500'}`}>Test</button>
+                  <button onClick={() => setGradeType('arbeit')} className={`flex-1 py-3 px-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-widest rounded-xl transition-all ${gradeType === 'arbeit' ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-400 dark:text-slate-500'}`}>Arbeit</button>
+                </div>
+
                 <div>
                   <label className="text-xs font-bold text-slate-400 uppercase tracking-widest pl-1 mb-2 block">Fach auswählen (Erforderlich)</label>
                   <input 
@@ -1576,19 +1596,23 @@ export default function App() {
                 </div>
 
                 <div className="grid grid-cols-3 gap-4">
-                  {(Object.entries(GRADE_POINTS) as [string, number][]).map(([grade, pts]) => (
-                    <button
-                      key={grade}
-                      onClick={() => addGradeResult(Number(grade) as Grade)}
-                      disabled={!selectedSubject.trim()}
-                      className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-50 dark:border-slate-800 hover:border-primary/20 dark:hover:border-primary/50 hover:bg-primary/5 transition-all group cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-slate-50 disabled:dark:hover:border-slate-800 disabled:hover:bg-transparent"
-                    >
-                      <span className="text-2xl font-display font-bold text-slate-900 dark:text-white mb-1">{grade}</span>
-                      <span className={`text-[10px] font-bold uppercase ${pts >= 0 ? 'text-green-500' : 'text-danger'}`}>
-                        {pts > 0 ? '+' : ''}{pts}
-                      </span>
-                    </button>
-                  ))}
+                  {(Object.entries(GRADE_POINTS) as [string, number][]).map(([grade, pts]) => {
+                    const multiplier = gradeType === 'vokabeltest' ? 0.2 : gradeType === 'test' ? 0.5 : 1;
+                    const calculatedPts = Math.round(pts * multiplier);
+                    return (
+                      <button
+                        key={grade}
+                        onClick={() => addGradeResult(Number(grade) as Grade)}
+                        disabled={!selectedSubject.trim()}
+                        className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-50 dark:border-slate-800 hover:border-primary/20 dark:hover:border-primary/50 hover:bg-primary/5 transition-all group cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-slate-50 disabled:dark:hover:border-slate-800 disabled:hover:bg-transparent"
+                      >
+                        <span className="text-2xl font-display font-bold text-slate-900 dark:text-white mb-1">{grade}</span>
+                        <span className={`text-[10px] font-bold uppercase ${calculatedPts >= 0 ? 'text-green-500' : 'text-danger'}`}>
+                          {calculatedPts > 0 ? '+' : ''}{calculatedPts}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </motion.div>
