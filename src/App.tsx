@@ -439,6 +439,9 @@ export default function App() {
     return localStorage.getItem('theme') === 'dark' || 
            (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches);
   });
+  const [themeColor, setThemeColor] = useState(() => {
+    return localStorage.getItem('theme_color') || 'blue';
+  });
 
   const [profile, setProfile] = useState<UserProfile>(() => {
     const saved = localStorage.getItem('klassenheld_profile');
@@ -695,6 +698,11 @@ export default function App() {
       localStorage.setItem('theme', 'light');
     }
   }, [isDark]);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', themeColor);
+    localStorage.setItem('theme_color', themeColor);
+  }, [themeColor]);
 
   // --- Derived State ---
 
@@ -2030,6 +2038,25 @@ export default function App() {
                   onChange={(e) => setTempGrade(e.target.value)}
                   className="w-full px-4 py-4 bg-slate-50 dark:bg-slate-800 dark:text-white border-2 border-transparent focus:bg-white dark:focus:bg-slate-900 focus:border-primary/30 focus:shadow-md focus:-translate-y-0.5 rounded-2xl text-sm font-semibold outline-none transition-all duration-300"
                 />
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">Themen Farbe</label>
+                  <div className="flex gap-3">
+                    {['blue', 'purple', 'green', 'rose', 'amber', 'orange'].map(color => (
+                        <button
+                          key={color}
+                          onClick={() => setThemeColor(color)}
+                          className={`w-8 h-8 rounded-full transition-all cursor-pointer hover:scale-110 active:scale-95 ${
+                            color === 'blue' ? 'bg-blue-500' :
+                            color === 'purple' ? 'bg-purple-500' :
+                            color === 'green' ? 'bg-green-500' :
+                            color === 'rose' ? 'bg-rose-500' :
+                            color === 'amber' ? 'bg-amber-500' : 
+                            'bg-orange-500'
+                          } ${themeColor === color ? 'ring-2 ring-offset-2 ring-offset-white dark:ring-offset-slate-900 ring-slate-400 dark:ring-slate-500 scale-110' : ''}`}
+                        />
+                    ))}
+                  </div>
+                </div>
                 <button 
                   onClick={saveSettings}
                   className="w-full bg-slate-900 dark:bg-slate-100 dark:text-slate-900 text-white font-bold py-4 rounded-2xl shadow-xl active:scale-[0.98] transition-all cursor-pointer"

@@ -5,11 +5,41 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Outfit", sans-serif;
 
-  --color-primary: #3b82f6;
-  --color-primary-dark: #2563eb;
+  --color-primary: var(--primary, #3b82f6);
+  --color-primary-dark: var(--primary-dark, #2563eb);
   --color-secondary: #10b981;
   --color-accent: #f59e0b;
   --color-danger: #ef4444;
+}
+
+:root {
+  --primary: #3b82f6;
+  --primary-dark: #2563eb;
+}
+
+:root[data-theme='blue'] {
+  --primary: #3b82f6;
+  --primary-dark: #2563eb;
+}
+
+:root[data-theme='purple'] {
+  --primary: #a855f7;
+  --primary-dark: #9333ea;
+}
+
+:root[data-theme='green'] {
+  --primary: #10b981;
+  --primary-dark: #059669;
+}
+
+:root[data-theme='rose'] {
+  --primary: #f43f5e;
+  --primary-dark: #e11d48;
+}
+
+:root[data-theme='amber'] {
+  --primary: #f59e0b;
+  --primary-dark: #d97706;
 }
 
 @layer base {
