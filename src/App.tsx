@@ -34,7 +34,9 @@ import {
   Lock,
   Flame,
   Download,
-  BookOpen
+  BookOpen,
+  Menu,
+  Users
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -68,6 +70,23 @@ interface ScheduleSlot {
   time: string;
 }
 
+interface BotData {
+  name: string;
+  dailyPoints: number[];
+}
+
+interface MultiplayerData {
+  leagueLevel: number;
+  weekStart: number;
+  lastResults?: {
+     promoted: boolean;
+     relegated: boolean;
+     rank: number;
+     leagueName: string;
+  };
+  bots: BotData[];
+}
+
 interface UserProfile {
   name: string;
   gradeLevel: string;
@@ -79,9 +98,10 @@ interface UserProfile {
   diary?: { id: string; date: number; text: string }[];
   estimatedGrades?: Record<string, number>;
   unlockedAchievements?: string[];
+  multiplayer?: MultiplayerData;
 }
 
-type Tab = 'dashboard' | 'schedule' | 'stats' | 'achievements';
+type Tab = 'dashboard' | 'schedule' | 'stats' | 'achievements' | 'multiplayer';
 
 interface Achievement {
   id: string;
@@ -164,6 +184,57 @@ const ACHIEVEMENTS: Achievement[] = [
 // --- Constants ---
 
 const DAYS = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag'];
+
+const BOT_NAMES = [
+  "Leon", "Paul", "Jonas", "Finn", "Elias", "Luis", "Noah", "Felix", "Lukas", "Maximilian",
+  "Emil", "Oskar", "Anton", "Julian", "Liam", "Jacob", "Moritz", "Linus", "Tim", "Philipp",
+  "Mia", "Emma", "Hannah", "Sofia", "Anna", "Emilia", "Lina", "Marie", "Lena", "Mila",
+  "Lea", "Leonie", "Amelie", "Sophie", "Lilly", "Luisa", "Johanna", "Clara", "Lara", "Maya",
+  "Max", "Tom", "Jan", "Erik", "Nick", "Ben", "Lotte", "Nora", "Pia", "Ida"
+];
+
+const LEAGUES = [
+  { level: 0, name: "Holz Liga", color: "text-amber-800", bg: "bg-amber-800/10", border: "border-amber-800/20" },
+  { level: 1, name: "Bronze Liga", color: "text-orange-700", bg: "bg-orange-700/10", border: "border-orange-700/20" },
+  { level: 2, name: "Silber Liga", color: "text-slate-400", bg: "bg-slate-400/10", border: "border-slate-400/20" },
+  { level: 3, name: "Gold Liga", color: "text-yellow-500", bg: "bg-yellow-500/10", border: "border-yellow-500/20" },
+  { level: 4, name: "Platin Liga", color: "text-cyan-500", bg: "bg-cyan-500/10", border: "border-cyan-500/20" },
+  { level: 5, name: "Diamant Liga", color: "text-blue-500", bg: "bg-blue-500/10", border: "border-blue-500/20" },
+  { level: 6, name: "Legenden Liga", color: "text-purple-500", bg: "bg-purple-500/10", border: "border-purple-500/20" }
+];
+
+function getMonday(nowMs: number) {
+  const d = new Date(nowMs);
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  return new Date(d.getFullYear(), d.getMonth(), diff).getTime();
+}
+
+function initMultiplayerData(leagueLevel: number, weekStart: number): MultiplayerData {
+  const bots: BotData[] = [];
+  const shuffledNames = [...BOT_NAMES].sort(() => 0.5 - Math.random());
+  for(let i=0; i<9; i++) {
+    const dailyPoints = [];
+    const avgPointsPerDay = (leagueLevel + 1) * 30; // e.g. Bronze=60, Silver=90, etc.
+    for(let d=0; d<7; d++) {
+      if (Math.random() < 0.2) {
+         dailyPoints.push(0);
+      } else {
+         const pts = Math.floor(Math.random() * avgPointsPerDay * 1.5);
+         dailyPoints.push(pts);
+      }
+    }
+    bots.push({
+      name: shuffledNames[i],
+      dailyPoints
+    });
+  }
+  return {
+    leagueLevel,
+    weekStart,
+    bots
+  };
+}
 
 const RANKS = [
   { name: 'Neuling', min: 0, color: 'text-slate-500 dark:text-slate-400', icon: '🐣' },
@@ -382,6 +453,53 @@ export default function App() {
     };
   });
 
+  // Check multiplayer progression
+  useEffect(() => {
+    if (authUsername && profile.name) {
+      const nowMs = Date.now();
+      const currentWeekStart = getMonday(nowMs);
+      
+      setProfile(prev => {
+        if (!prev.multiplayer) {
+          return { ...prev, multiplayer: initMultiplayerData(0, currentWeekStart) };
+        }
+        
+        if (prev.multiplayer.weekStart < currentWeekStart) {
+          const prevWeekStart = prev.multiplayer.weekStart;
+          const userWeeklyPts = prev.history.filter(h => h.date >= prevWeekStart && h.date < prevWeekStart + 7*24*60*60*1000).reduce((acc, h) => acc + (h.points || 0), 0);
+          
+          const botsFinal = prev.multiplayer.bots.map(b => ({
+            name: b.name,
+            points: b.dailyPoints.reduce((a,c)=>a+c,0)
+          }));
+          
+          const leaderboard = [...botsFinal, { name: prev.name, points: userWeeklyPts, isUser: true }].sort((a,b) => b.points - a.points);
+          const userRank = leaderboard.findIndex((x: any) => x.isUser) + 1;
+          
+          let newLevel = prev.multiplayer.leagueLevel;
+          let promoted = false;
+          let relegated = false;
+          
+          if (userRank <= 3) {
+            newLevel = Math.min(LEAGUES.length - 1, newLevel + 1);
+            promoted = true;
+          } else if (userRank >= 8) {
+            newLevel = Math.max(0, newLevel - 1);
+            relegated = true;
+          }
+          
+          const leagueName = LEAGUES[Math.min(LEAGUES.length - 1, prev.multiplayer.leagueLevel)].name;
+          const newData = initMultiplayerData(newLevel, currentWeekStart);
+          newData.lastResults = { promoted, relegated, rank: userRank, leagueName };
+          
+          return { ...prev, multiplayer: newData };
+        }
+        
+        return prev;
+      });
+    }
+  }, [authUsername, profile.name]);
+
   // Check and update streak
   useEffect(() => {
     if (authUsername) {
@@ -414,6 +532,7 @@ export default function App() {
   const [isGradeModalOpen, setIsGradeModalOpen] = useState(false);
   const [gradeType, setGradeType] = useState<'vokabeltest' | 'test' | 'arbeit'>('arbeit');
   const [isPartModalOpen, setIsPartModalOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [partMode, setPartMode] = useState<'total' | 'subject'>('total');
   const [partTotal, setPartTotal] = useState<number>(1);
   const [partSubjects, setPartSubjects] = useState<Record<string, number>>({});
@@ -564,6 +683,35 @@ export default function App() {
 
     return last7Days.map(d => ({ name: d.label, count: dailyCounts[d.label], isToday: d.isToday }));
   }, [profile.history]);
+
+  // Multiplayer Standings
+  const multiplayerStandings = useMemo(() => {
+    if (!profile.multiplayer) return [];
+    const now = new Date();
+    let todayIndex = now.getDay() - 1;
+    if (todayIndex === -1) todayIndex = 6; // Sunday
+    
+    // Distribute points based on the current hour of the day
+    const hourOfDay = now.getHours() + (now.getMinutes() / 60);
+    
+    const botsWithCurrentPoints = profile.multiplayer.bots.map(b => {
+      let pts = 0;
+      for (let i = 0; i < todayIndex; i++) {
+         pts += b.dailyPoints[i];
+      }
+      // partial points for today
+      const todayPts = b.dailyPoints[todayIndex];
+      pts += Math.floor(todayPts * (hourOfDay / 24));
+      
+      return { name: b.name, points: pts, isUser: false };
+    });
+    
+    const userPts = profile.history.filter(h => h.date >= profile.multiplayer!.weekStart).reduce((acc, h) => acc + (h.points || 0), 0);
+    
+    const all = [...botsWithCurrentPoints, { name: profile.name, points: userPts, isUser: true }];
+    all.sort((a,b) => b.points - a.points);
+    return all;
+  }, [profile.history, profile.multiplayer]);
 
   // Grade Stats by Subject
   const gradeStats = useMemo(() => {
@@ -880,6 +1028,12 @@ export default function App() {
       <header className="bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 sticky top-0 z-40 px-4 py-4 md:px-8">
         <div className="max-w-2xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
+            <button 
+              onClick={() => setIsSidebarOpen(true)}
+              className="p-2 -ml-2 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            >
+              <Menu className="w-6 h-6" />
+            </button>
             <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center">
               <Trophy className="text-primary w-6 h-6" />
             </div>
@@ -1426,6 +1580,64 @@ export default function App() {
               </section>
             </motion.div>
           )}
+          {activeTab === 'multiplayer' && (
+            <motion.div 
+              key="multiplayer"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-6"
+            >
+              <div className="card p-6 flex flex-col items-center justify-center text-center space-y-4">
+                <div className={`w-24 h-24 rounded-full flex items-center justify-center shadow-lg border-4 ${profile.multiplayer ? LEAGUES[profile.multiplayer.leagueLevel].border + ' ' + LEAGUES[profile.multiplayer.leagueLevel].bg : ''}`}>
+                  <Trophy className={`w-12 h-12 ${profile.multiplayer ? LEAGUES[profile.multiplayer.leagueLevel].color : ''}`} />
+                </div>
+                <div>
+                  <h2 className="text-3xl font-display font-black text-slate-900 dark:text-white uppercase tracking-tight">
+                    {profile.multiplayer ? LEAGUES[profile.multiplayer.leagueLevel].name : 'Laden...'}
+                  </h2>
+                  <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-2">Endet diesen Sonntag um Mitternacht</p>
+                </div>
+                {profile.multiplayer?.lastResults && (
+                   <div className="mt-2 text-sm px-5 py-2.5 bg-slate-100 dark:bg-slate-800 rounded-xl text-slate-600 dark:text-slate-300 font-bold">
+                     Letzte Woche: Platz {profile.multiplayer.lastResults.rank} - {profile.multiplayer.lastResults.promoted ? 'Aufgestiegen! 🎉' : profile.multiplayer.lastResults.relegated ? 'Abgestiegen 😢' : 'Klassenerhalt'}
+                   </div>
+                )}
+              </div>
+              
+              <div className="space-y-3">
+                <div className="px-4 flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                   <span className="flex-1">Platzierung</span>
+                   <span className="flex-none">Wochenpunkte</span>
+                </div>
+                {multiplayerStandings.map((player, index) => (
+                  <div key={player.name} className={`flex items-center justify-between p-4 rounded-2xl border-2 transition-all relative overflow-hidden ${
+                     player.isUser ? 'bg-primary/10 border-primary/30 shadow-md' : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800'
+                  }`}>
+                    {index < 3 && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-green-500 rounded-l-2xl"></div>}
+                    {index > 6 && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-red-500 rounded-l-2xl"></div>}
+                    
+                    <div className="flex items-center gap-4 pl-2">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${
+                        index === 0 ? 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 ring-2 ring-yellow-400/50' :
+                        index === 1 ? 'bg-slate-200 text-slate-600 dark:bg-slate-700 ring-2 ring-slate-400/50' :
+                        index === 2 ? 'bg-orange-100 text-orange-600 dark:bg-orange-900/30 ring-2 ring-orange-400/50' :
+                        'bg-slate-50 dark:bg-slate-800 text-slate-400'
+                      }`}>
+                         {index + 1}
+                      </div>
+                      <span className={`font-bold text-sm ${player.isUser ? 'text-primary' : 'text-slate-700 dark:text-slate-200'}`}>
+                         {player.name} {player.isUser ? ' (Du)' : ''}
+                      </span>
+                    </div>
+                    <span className="font-display font-bold text-xl text-slate-900 dark:text-white tracking-tight">
+                      {player.points.toLocaleString()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
         </AnimatePresence>
       </main>
 
@@ -1461,6 +1673,56 @@ export default function App() {
 
       {/* Modals */}
       <AnimatePresence>
+        {isSidebarOpen && (
+          <div className="fixed inset-0 z-[60] flex">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsSidebarOpen(false)}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="relative w-72 max-w-[80vw] h-full bg-white dark:bg-slate-900 shadow-2xl flex flex-col z-10"
+            >
+              <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 bg-primary/10 rounded-lg flex items-center justify-center">
+                    <Trophy className="text-primary w-5 h-5" />
+                  </div>
+                  <span className="font-display font-bold text-lg text-slate-900 dark:text-white">Klassenheld</span>
+                </div>
+                <button 
+                  onClick={() => setIsSidebarOpen(false)}
+                  className="p-2 -mr-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto py-4">
+                <div className="px-4 space-y-1">
+                  <div className="px-3 py-2">
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Spielen</p>
+                  </div>
+                  
+                  <button onClick={() => { setActiveTab('multiplayer'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-3 py-3 text-left rounded-xl transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50 group ${activeTab === 'multiplayer' ? 'text-primary' : 'text-slate-600 dark:text-slate-300'}`}>
+                    <Users className="w-5 h-5" />
+                    <div className="flex-1">
+                      <span className="font-bold flex items-center gap-2">Multiplayer</span>
+                    </div>
+                    <ChevronRight className="w-4 h-4 opacity-50 group-hover:opacity-100 transition-opacity" />
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
         {isPartModalOpen && (
           <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
             <motion.div 
