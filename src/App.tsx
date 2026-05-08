@@ -215,12 +215,19 @@ function initMultiplayerData(leagueLevel: number, weekStart: number): Multiplaye
   const shuffledNames = [...BOT_NAMES].sort(() => 0.5 - Math.random());
   for(let i=0; i<9; i++) {
     const dailyPoints = [];
-    const avgPointsPerDay = (leagueLevel + 1) * 30; // e.g. Bronze=60, Silver=90, etc.
+    // Die Punkte skalieren mit steigender Liga immer stärker (exponentiell)
+    // Level 0: ~35 Avg, Level 6: ~270 Avg
+    const avgPointsPerDay = 20 + Math.pow(1.6, leagueLevel) * 15; 
+    
+    // Damit nicht alle gleich stark sind, bekommt jeder Bot einen kleinen Multiplikator
+    const botSkillModifier = 0.7 + (Math.random() * 0.6); // 0.7 bis 1.3
+    
     for(let d=0; d<7; d++) {
       if (Math.random() < 0.2) {
+         // An manchen Tagen macht der Bot eine Pause
          dailyPoints.push(0);
       } else {
-         const pts = Math.floor(Math.random() * avgPointsPerDay * 1.5);
+         const pts = Math.floor(Math.random() * avgPointsPerDay * botSkillModifier * 1.5);
          dailyPoints.push(pts);
       }
     }
@@ -367,7 +374,7 @@ function AuthScreen({ onAuth }: { onAuth: (username: string, profile: UserProfil
               type="text" 
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 dark:text-white border-none rounded-xl text-sm font-semibold outline-none transition-all"
+              className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 dark:text-white border-2 border-transparent focus:bg-white dark:focus:bg-slate-900 focus:border-primary/30 focus:shadow-md focus:-translate-y-0.5 rounded-xl text-sm font-semibold outline-none transition-all duration-300"
             />
           </div>
           <div>
@@ -376,7 +383,7 @@ function AuthScreen({ onAuth }: { onAuth: (username: string, profile: UserProfil
               type="password" 
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 dark:text-white border-none rounded-xl text-sm font-semibold outline-none transition-all"
+              className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 dark:text-white border-2 border-transparent focus:bg-white dark:focus:bg-slate-900 focus:border-primary/30 focus:shadow-md focus:-translate-y-0.5 rounded-xl text-sm font-semibold outline-none transition-all duration-300"
             />
           </div>
 
@@ -1133,7 +1140,7 @@ export default function App() {
                   <motion.button 
                     whileTap={{ scale: 0.95 }}
                     onClick={openPartModal}
-                    className="flex flex-col items-center justify-center p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-md transition-all group cursor-pointer"
+                    className="flex flex-col items-center justify-center p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all duration-300 group cursor-pointer"
                     id="participation-btn"
                   >
                     <div className="w-16 h-16 bg-blue-50 dark:bg-blue-500/10 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
@@ -1146,7 +1153,7 @@ export default function App() {
                   <motion.button 
                     whileTap={{ scale: 0.95 }}
                     onClick={openGradeModal}
-                    className="flex flex-col items-center justify-center p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-md transition-all group cursor-pointer"
+                    className="flex flex-col items-center justify-center p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all duration-300 group cursor-pointer"
                     id="grade-btn"
                   >
                     <div className="w-16 h-16 bg-green-50 dark:bg-green-500/10 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
@@ -1161,7 +1168,7 @@ export default function App() {
                   <motion.button
                     whileTap={{ scale: 0.95 }}
                     onClick={() => setIsDiaryOpen(true)}
-                    className="flex items-center gap-3 p-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-md transition-all group cursor-pointer"
+                    className="flex items-center gap-3 p-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all duration-300 group cursor-pointer"
                   >
                     <div className="w-10 h-10 bg-purple-50 dark:bg-purple-500/10 rounded-xl flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
                       <BookOpen className="text-purple-500 w-5 h-5" />
@@ -1175,7 +1182,7 @@ export default function App() {
                   <motion.button
                     whileTap={{ scale: 0.95 }}
                     onClick={() => setIsGradesOpen(true)}
-                    className="flex items-center gap-3 p-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-md transition-all group cursor-pointer"
+                    className="flex items-center gap-3 p-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all duration-300 group cursor-pointer"
                   >
                     <div className="w-10 h-10 bg-orange-50 dark:bg-orange-500/10 rounded-xl flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
                       <TrendingUp className="text-orange-500 w-5 h-5" />
@@ -1299,7 +1306,7 @@ export default function App() {
                           <div 
                             key={slot.id} 
                             onClick={() => setSubjectDetails(slot.subject)}
-                            className="flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/50 p-3 rounded-2xl border border-slate-100 dark:border-slate-800 group cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors"
+                            className="flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/50 p-3 rounded-2xl border border-slate-100 dark:border-slate-800 group cursor-pointer hover:bg-white dark:hover:bg-slate-800 hover:shadow-sm hover:-translate-y-0.5 transition-all duration-300"
                           >
                             <div className="flex items-center gap-3">
                               <div className="w-8 h-8 bg-white dark:bg-slate-900 rounded-lg flex items-center justify-center shadow-sm">
@@ -1547,9 +1554,9 @@ export default function App() {
                   return (
                     <div 
                       key={achievement.id}
-                      className={`relative overflow-hidden p-6 rounded-3xl border-2 transition-all ${
+                      className={`relative overflow-hidden p-6 rounded-3xl border-2 transition-all duration-300 ${
                         unlocked 
-                          ? 'bg-white dark:bg-slate-900 border-primary/20 shadow-lg shadow-primary/5' 
+                          ? 'bg-white dark:bg-slate-900 border-primary/20 shadow-lg shadow-primary/5 hover:shadow-xl hover:-translate-y-1' 
                           : 'bg-slate-50 dark:bg-slate-800/50 border-slate-100 dark:border-slate-800 opacity-60 grayscale'
                       }`}
                     >
@@ -1611,7 +1618,7 @@ export default function App() {
                    <span className="flex-none">Wochenpunkte</span>
                 </div>
                 {multiplayerStandings.map((player, index) => (
-                  <div key={player.name} className={`flex items-center justify-between p-4 rounded-2xl border-2 transition-all relative overflow-hidden ${
+                  <div key={player.name} className={`flex items-center justify-between p-4 rounded-2xl border-2 transition-all duration-300 relative overflow-hidden hover:shadow-md hover:-translate-y-0.5 ${
                      player.isUser ? 'bg-primary/10 border-primary/30 shadow-md' : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800'
                   }`}>
                     {index < 3 && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-green-500 rounded-l-2xl"></div>}
@@ -1653,7 +1660,7 @@ export default function App() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as Tab)}
-              className={`flex flex-col items-center gap-1 transition-all relative py-2 px-6 rounded-2xl cursor-pointer ${
+              className={`flex flex-col items-center gap-1 transition-all duration-300 relative py-2 px-6 rounded-2xl cursor-pointer group ${
                 activeTab === tab.id ? 'text-primary' : 'text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300'
               }`}
             >
@@ -1664,8 +1671,8 @@ export default function App() {
                   transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
                 />
               )}
-              <tab.icon className={`w-6 h-6 transition-transform ${activeTab === tab.id ? 'scale-110' : ''}`} />
-              <span className="text-[10px] font-bold uppercase tracking-widest">{tab.label}</span>
+              <tab.icon className={`w-6 h-6 transition-transform duration-300 ${activeTab === tab.id ? 'scale-110' : 'group-hover:scale-110 group-hover:-translate-y-0.5'}`} />
+              <span className="text-[10px] font-bold uppercase tracking-widest transition-transform duration-300 group-hover:translate-y-0.5">{tab.label}</span>
             </button>
           ))}
         </div>
@@ -1850,7 +1857,7 @@ export default function App() {
                     value={selectedSubject}
                     onChange={(e) => setSelectedSubject(e.target.value)}
                     placeholder="Fach (z.B. Mathematik)"
-                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 dark:text-white border-transparent focus:border-primary/30 border text-sm font-semibold rounded-2xl outline-none transition-all"
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 dark:text-white border-2 border-transparent focus:bg-white dark:focus:bg-slate-900 focus:border-primary/30 focus:shadow-md focus:-translate-y-0.5 rounded-2xl text-sm font-semibold outline-none transition-all duration-300"
                   />
                   <datalist id="subject-list">
                     {availableSubjects.map((s, i) => <option key={i} value={s} />)}
@@ -1866,7 +1873,7 @@ export default function App() {
                         key={grade}
                         onClick={() => addGradeResult(Number(grade) as Grade)}
                         disabled={!selectedSubject.trim()}
-                        className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-50 dark:border-slate-800 hover:border-primary/20 dark:hover:border-primary/50 hover:bg-primary/5 transition-all group cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-slate-50 disabled:dark:hover:border-slate-800 disabled:hover:bg-transparent"
+                        className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-50 dark:border-slate-800 hover:border-primary/20 dark:hover:border-primary/50 hover:bg-primary/5 hover:-translate-y-1 hover:shadow-md transition-all duration-300 group cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-slate-50 disabled:dark:hover:border-slate-800 disabled:hover:bg-transparent disabled:hover:-translate-y-0 disabled:hover:shadow-none"
                       >
                         <span className="text-2xl font-display font-bold text-slate-900 dark:text-white mb-1">{grade}</span>
                         <span className={`text-[10px] font-bold uppercase ${calculatedPts >= 0 ? 'text-green-500' : 'text-danger'}`}>
@@ -1903,13 +1910,13 @@ export default function App() {
                   placeholder="Fach (z.B. Mathematik)"
                   value={newSlot.subject}
                   onChange={(e) => setNewSlot(prev => ({ ...prev, subject: e.target.value }))}
-                  className="w-full px-4 py-4 bg-slate-50 dark:bg-slate-800 dark:text-white border-none rounded-2xl text-sm font-semibold outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                  className="w-full px-4 py-4 bg-slate-50 dark:bg-slate-800 dark:text-white border-2 border-transparent focus:bg-white dark:focus:bg-slate-900 focus:border-primary/30 focus:shadow-md focus:-translate-y-0.5 rounded-2xl text-sm font-semibold outline-none transition-all duration-300"
                 />
                 <input 
                   type="time" 
                   value={newSlot.time}
                   onChange={(e) => setNewSlot(prev => ({ ...prev, time: e.target.value }))}
-                  className="w-full px-4 py-4 bg-slate-50 dark:bg-slate-800 dark:text-white border-none rounded-2xl text-sm font-semibold outline-none focus:ring-2 focus:ring-primary/20 transition-all font-mono"
+                  className="w-full px-4 py-4 bg-slate-50 dark:bg-slate-800 dark:text-white border-2 border-transparent focus:bg-white dark:focus:bg-slate-900 focus:border-primary/30 focus:shadow-md focus:-translate-y-0.5 rounded-2xl text-sm font-semibold outline-none transition-all duration-300 font-mono"
                 />
                 <button 
                   onClick={addScheduleSlot}
@@ -1943,13 +1950,13 @@ export default function App() {
                   type="text" 
                   value={tempName}
                   onChange={(e) => setTempName(e.target.value)}
-                  className="w-full px-4 py-4 bg-slate-50 dark:bg-slate-800 dark:text-white border-none rounded-2xl text-sm font-semibold outline-none transition-all"
+                  className="w-full px-4 py-4 bg-slate-50 dark:bg-slate-800 dark:text-white border-2 border-transparent focus:bg-white dark:focus:bg-slate-900 focus:border-primary/30 focus:shadow-md focus:-translate-y-0.5 rounded-2xl text-sm font-semibold outline-none transition-all duration-300"
                 />
                 <input 
                   type="text" 
                   value={tempGrade}
                   onChange={(e) => setTempGrade(e.target.value)}
-                  className="w-full px-4 py-4 bg-slate-50 dark:bg-slate-800 dark:text-white border-none rounded-2xl text-sm font-semibold outline-none transition-all"
+                  className="w-full px-4 py-4 bg-slate-50 dark:bg-slate-800 dark:text-white border-2 border-transparent focus:bg-white dark:focus:bg-slate-900 focus:border-primary/30 focus:shadow-md focus:-translate-y-0.5 rounded-2xl text-sm font-semibold outline-none transition-all duration-300"
                 />
                 <button 
                   onClick={saveSettings}
@@ -2090,7 +2097,7 @@ export default function App() {
                   value={diaryText}
                   onChange={(e) => setDiaryText(e.target.value)}
                   placeholder="Wie war dein Tag heute?"
-                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 dark:text-white border-none rounded-2xl text-sm outline-none resize-none h-24 transition-all"
+                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 dark:text-white border-2 border-transparent focus:bg-white dark:focus:bg-slate-900 focus:border-primary/30 focus:shadow-md focus:-translate-y-0.5 rounded-2xl text-sm outline-none resize-none h-24 transition-all duration-300"
                 />
                 <button 
                   onClick={addDiaryEntry}
