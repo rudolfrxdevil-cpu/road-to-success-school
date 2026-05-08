@@ -36,7 +36,11 @@ import {
   Download,
   BookOpen,
   Menu,
-  Users
+  Users,
+  Timer,
+  Play,
+  Pause,
+  RotateCcw
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -562,6 +566,53 @@ export default function App() {
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [celebrationInfo, setCelebrationInfo] = useState<{title: string, subtitle?: string} | null>(null);
+
+  // Timer State
+  const [isTimerOpen, setIsTimerOpen] = useState(false);
+  const [timerMode, setTimerMode] = useState<'focus' | 'break'>('focus');
+  const [timeLeft, setTimeLeft] = useState(25 * 60);
+  const [isTimerActive, setIsTimerActive] = useState(false);
+
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | null = null;
+    if (isTimerActive && timeLeft > 0) {
+      interval = setInterval(() => {
+        setTimeLeft(prev => prev - 1);
+      }, 1000);
+    } else if (isTimerActive && timeLeft === 0) {
+      setIsTimerActive(false);
+      if (timerMode === 'focus') {
+        triggerCelebration('Fokus-Session beendet!', '+50 Punkte');
+        setProfile(prev => ({
+          ...prev,
+          points: prev.points + 50,
+          history: [...prev.history, {
+            id: Math.random().toString(36).substr(2, 9),
+            type: 'challenge',
+            value: 1,
+            points: 50,
+            date: Date.now(),
+            comment: 'Fokus-Session'
+          }]
+        }));
+        setTimerMode('break');
+        setTimeLeft(5 * 60);
+      } else {
+        triggerCelebration('Pause beendet!', 'Bereit für die nächste Session?');
+        setTimerMode('focus');
+        setTimeLeft(25 * 60);
+      }
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isTimerActive, timeLeft, timerMode]);
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
 
   const triggerCelebration = (title: string, subtitle?: string) => {
     setCelebrationInfo({ title, subtitle });
@@ -1193,6 +1244,27 @@ export default function App() {
                     </div>
                   </motion.button>
                 </div>
+
+                <motion.button
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => setIsTimerOpen(true)}
+                  className="w-full flex items-center gap-4 p-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all duration-300 group cursor-pointer"
+                >
+                  <div className="w-12 h-12 bg-indigo-50 dark:bg-indigo-500/10 rounded-xl flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                    <Timer className="text-indigo-500 w-6 h-6" />
+                  </div>
+                  <div className="text-left flex-1 min-w-0">
+                    <span className="block font-display font-bold text-slate-900 dark:text-white truncate">Study Timer</span>
+                    <span className="text-[10px] text-indigo-500 font-bold block truncate">Fokussiert lernen (+XP)</span>
+                  </div>
+                  <div className="text-right">
+                     {isTimerActive ? (
+                       <span className="text-sm font-bold text-primary tabular-nums tracking-tighter">{formatTime(timeLeft)}</span>
+                     ) : (
+                       <span className="text-xs font-bold text-slate-400 bg-slate-100 dark:bg-slate-800 py-1 px-2 rounded-lg">Start</span>
+                     )}
+                  </div>
+                </motion.button>
               </section>
 
               {/* Daily Challenges */}
@@ -1650,7 +1722,7 @@ export default function App() {
 
       {/* Navigation Bar */}
       <nav className="fixed bottom-0 left-0 right-0 z-50 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-t border-slate-100 dark:border-slate-800 pb-safe">
-        <div className="max-w-2xl mx-auto px-6 h-20 flex items-center justify-around flex-row">
+        <div className="max-w-2xl mx-auto px-2 sm:px-6 h-20 flex items-center justify-around flex-row">
           {[
             { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
             { id: 'schedule', icon: Calendar, label: 'Plan' },
@@ -1660,7 +1732,7 @@ export default function App() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as Tab)}
-              className={`flex flex-col items-center gap-1 transition-all duration-300 relative py-2 px-6 rounded-2xl cursor-pointer group ${
+              className={`flex flex-col items-center justify-center gap-1 transition-all duration-300 relative p-2 sm:py-2 sm:px-6 rounded-2xl cursor-pointer group flex-1 sm:flex-none ${
                 activeTab === tab.id ? 'text-primary' : 'text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300'
               }`}
             >
@@ -2041,6 +2113,113 @@ export default function App() {
                 >
                   Verstanden
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {isTimerOpen && (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsTimerOpen(false)}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, y: 100, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 100, scale: 0.95 }}
+              className="relative w-full max-w-sm bg-white dark:bg-slate-900 rounded-[2rem] shadow-2xl border border-slate-100 dark:border-slate-800 overflow-hidden flex flex-col max-h-[90vh]"
+            >
+              <div className="flex items-center justify-between p-6 pb-2">
+                <h3 className="font-display font-bold text-xl dark:text-white flex items-center gap-2">
+                  <Timer className="text-indigo-500 w-6 h-6" />
+                  Study Timer
+                </h3>
+                <button 
+                  onClick={() => setIsTimerOpen(false)}
+                  className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-6 flex flex-col items-center">
+                <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl mb-8 w-full">
+                  <button 
+                    onClick={() => {
+                      setTimerMode('focus');
+                      setTimeLeft(25 * 60);
+                      setIsTimerActive(false);
+                    }}
+                    className={`flex-1 py-2 text-sm font-bold rounded-xl transition-all ${timerMode === 'focus' ? 'bg-white dark:bg-slate-700 text-indigo-500 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                  >
+                    Fokus (25m)
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setTimerMode('break');
+                      setTimeLeft(5 * 60);
+                      setIsTimerActive(false);
+                    }}
+                    className={`flex-1 py-2 text-sm font-bold rounded-xl transition-all ${timerMode === 'break' ? 'bg-white dark:bg-slate-700 text-green-500 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                  >
+                    Pause (5m)
+                  </button>
+                </div>
+
+                <div className="relative w-48 h-48 flex items-center justify-center mb-8">
+                  <svg className="absolute inset-0 w-full h-full transform -rotate-90">
+                    <circle cx="96" cy="96" r="88" className="stroke-slate-100 dark:stroke-slate-800" strokeWidth="8" fill="none" />
+                    <circle 
+                      cx="96" 
+                      cy="96" 
+                      r="88" 
+                      className={`transition-all duration-1000 ease-linear ${timerMode === 'focus' ? 'stroke-indigo-500' : 'stroke-green-500'}`} 
+                      strokeWidth="8" 
+                      fill="none" 
+                      strokeDasharray={2 * Math.PI * 88}
+                      strokeDashoffset={2 * Math.PI * 88 * (1 - timeLeft / (timerMode === 'focus' ? 25 * 60 : 5 * 60))}
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  <div className="text-center z-10">
+                    <span className="block text-5xl font-display font-bold text-slate-900 dark:text-white tabular-nums tracking-tighter">
+                      {formatTime(timeLeft)}
+                    </span>
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">
+                      {timerMode === 'focus' ? 'Bleib fokussiert' : 'Entspann dich'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-4 w-full">
+                  <button 
+                    onClick={() => setIsTimerActive(!isTimerActive)}
+                    className={`flex-1 flex items-center justify-center gap-2 font-bold py-4 rounded-2xl shadow-xl active:scale-[0.98] transition-all text-white ${timerMode === 'focus' ? (isTimerActive ? 'bg-orange-500 hover:bg-orange-600' : 'bg-indigo-500 hover:bg-indigo-600') : (isTimerActive ? 'bg-orange-500 hover:bg-orange-600' : 'bg-green-500 hover:bg-green-600')}`}
+                  >
+                    {isTimerActive ? (
+                      <>
+                        <Pause className="w-5 h-5 fill-current" /> Pause
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-5 h-5 fill-current" /> Start
+                      </>
+                    )}
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setIsTimerActive(false);
+                      setTimeLeft(timerMode === 'focus' ? 25 * 60 : 5 * 60);
+                    }}
+                    className="w-14 h-14 shrink-0 flex items-center justify-center rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors active:scale-[0.98]"
+                  >
+                    <RotateCcw className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>
