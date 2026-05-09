@@ -1581,7 +1581,7 @@ export default function App() {
                 </section>
               )}
 
-              <section className="grid grid-cols-2 gap-4">
+              <section className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                 <div className="card p-5 space-y-2">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Ø Meldungen/Tag</span>
                   <p className="text-2xl font-display font-bold text-slate-900 dark:text-white">
@@ -1589,6 +1589,12 @@ export default function App() {
                   </p>
                 </div>
                 <div className="card p-5 space-y-2">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Meldungen total</span>
+                  <p className="text-2xl font-display font-bold text-slate-900 dark:text-white">
+                    {profile.history.filter(h => h.type === 'participation').reduce((sum, h) => sum + (h.value || 1), 0)}
+                  </p>
+                </div>
+                <div className="card p-5 space-y-2 col-span-2 sm:col-span-1">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total Punkte</span>
                   <p className="text-2xl font-display font-bold text-primary">{profile.points}</p>
                 </div>
