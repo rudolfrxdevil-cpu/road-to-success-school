@@ -525,12 +525,46 @@ export default function App() {
         const oneDay = 24 * 60 * 60 * 1000;
         
         let newStreak = prev.streak || 0;
+        
+        // Überprüfen, ob es überhaupt eingetragene Fächer im Stundenplan gibt
+        const hasAnySchedule = Object.values(prev.schedule).some(day => day && day.length > 0);
+
+        // Zähle verpasste Schultage
+        let missedSchoolDays = 0;
+        if (lastLoginDay > 0 && today > lastLoginDay) {
+          let curr = new Date(lastLoginDay + oneDay);
+          while (curr.getTime() < today) {
+            const day = curr.getDay(); // 0 = Sonntag, 6 = Samstag
+            const isWeekend = day === 0 || day === 6;
+            
+            let isSchoolFree = isWeekend;
+            if (!isWeekend && hasAnySchedule) {
+              // Falls ein Stundenplan existiert, aber an diesem Wochentag keine Fächer eingetragen sind -> schulfrei
+              const scheduleDayIndex = day - 1; // 1 (Mon) -> 0, etc.
+              if (!prev.schedule[scheduleDayIndex] || prev.schedule[scheduleDayIndex].length === 0) {
+                isSchoolFree = true;
+              }
+            }
+
+            if (!isSchoolFree) {
+              missedSchoolDays++;
+            }
+            curr.setDate(curr.getDate() + 1);
+          }
+        }
+
         if (lastLoginDay === 0) {
           newStreak = 1;
         } else if (today - lastLoginDay === oneDay) {
           newStreak += 1;
         } else if (today - lastLoginDay > oneDay) {
-          newStreak = 1;
+          if (missedSchoolDays === 0) {
+            // Es wurden nur Wochenenden oder schulfreie Tage verpasst -> Streak bleibt erhalten & erhöht sich, da er sich heute einloggt
+            newStreak += 1;
+          } else {
+            // Echte Schultage verpasst -> Streak bricht
+            newStreak = 1;
+          }
         } else if (today === lastLoginDay && newStreak === 0) {
           newStreak = 1;
         }
@@ -619,11 +653,27 @@ export default function App() {
 
   const triggerCelebration = (title: string, subtitle?: string) => {
     setCelebrationInfo({ title, subtitle });
-    confetti({
+    const myCanvas = document.createElement('canvas');
+    myCanvas.style.position = 'fixed';
+    myCanvas.style.inset = '0px';
+    myCanvas.style.width = '100vw';
+    myCanvas.style.height = '100vh';
+    myCanvas.style.zIndex = '9999';
+    myCanvas.style.pointerEvents = 'none';
+    document.body.appendChild(myCanvas);
+
+    const myConfetti = confetti.create(myCanvas, {
+      resize: true,
+      useWorker: true
+    });
+
+    myConfetti({
       particleCount: 200,
       spread: 120,
       origin: { y: 0.6 },
       colors: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6']
+    }).then(() => {
+      myCanvas.remove();
     });
     setTimeout(() => setCelebrationInfo(null), 3500);
   };
