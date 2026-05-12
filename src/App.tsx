@@ -18,6 +18,9 @@ import {
   Edit3, 
   User,
   Settings,
+  AlertTriangle,
+  Terminal,
+  Zap,
   TrendingUp,
   Award,
   Calendar,
@@ -105,7 +108,7 @@ interface UserProfile {
   multiplayer?: MultiplayerData;
 }
 
-type Tab = 'dashboard' | 'schedule' | 'stats' | 'achievements' | 'multiplayer';
+type Tab = 'dashboard' | 'schedule' | 'stats' | 'achievements' | 'multiplayer' | 'dev';
 
 interface Achievement {
   id: string;
@@ -157,32 +160,132 @@ const getTrendGrade = (subject: string, baseGrade: number, history: HistoryEntry
 };
 
 const ACHIEVEMENTS: Achievement[] = [
+  // --- Meldungen (14) ---
   { id: 'first_participation', title: 'Erste Meldung', description: 'Du hast dich zum ersten Mal gemeldet.', icon: '🙋', condition: (p) => p.history.some(h => h.type === 'participation') },
   { id: '10_participations', title: '10 Meldungen', description: 'Du hast dich 10 Mal gemeldet!', icon: '🗣️', condition: (p) => p.history.filter(h => h.type === 'participation').length >= 10 },
   { id: '25_participations', title: 'Diskussionsfreudig', description: 'Du hast dich 25 Mal gemeldet!', icon: '💬', condition: (p) => p.history.filter(h => h.type === 'participation').length >= 25 },
   { id: '50_participations', title: 'Quasselstrippe', description: 'Du hast dich unglaubliche 50 Mal gemeldet.', icon: '🦜', condition: (p) => p.history.filter(h => h.type === 'participation').length >= 50 },
   { id: '100_participations', title: 'Megaphon', description: 'Legendär! Du hast dich 100 Mal gemeldet.', icon: '📢', condition: (p) => p.history.filter(h => h.type === 'participation').length >= 100 },
+  { id: '150_participations', title: 'Stimmgewalt', description: 'Du hast dich schon 150 Mal gemeldet!', icon: '📣', condition: (p) => p.history.filter(h => h.type === 'participation').length >= 150 },
   { id: '200_participations', title: 'Radio-Moderator', description: 'Unglaubliche 200 Meldungen. Respekt!', icon: '🎙️', condition: (p) => p.history.filter(h => h.type === 'participation').length >= 200 },
+  { id: '300_participations', title: 'Unüberhörbar', description: '300 Meldungen! Die Klasse hört nur noch dich.', icon: '🔊', condition: (p) => p.history.filter(h => h.type === 'participation').length >= 300 },
+  { id: '400_participations', title: 'Dauermeldung', description: '400 Mal den Finger oben. Ist dein Arm schon schwer?', icon: '💪', condition: (p) => p.history.filter(h => h.type === 'participation').length >= 400 },
+  { id: '500_participations', title: 'Halber Tausender', description: '500 Meldungen! Du bist der Star der Mitarbeit.', icon: '⭐', condition: (p) => p.history.filter(h => h.type === 'participation').length >= 500 },
+  { id: '600_participations', title: 'Wissensquelle', description: '600 Mal beigetragen. Wahnsinn!', icon: '🌊', condition: (p) => p.history.filter(h => h.type === 'participation').length >= 600 },
+  { id: '750_participations', title: 'Mitarbeits-König', description: '750 Meldungen! Du regierst das Klassenzimmer.', icon: '🏰', condition: (p) => p.history.filter(h => h.type === 'participation').length >= 750 },
+  { id: '900_participations', title: 'Fast am Ziel', description: '900 Meldungen. Die 1000 ist nah!', icon: '⚡', condition: (p) => p.history.filter(h => h.type === 'participation').length >= 900 },
+  { id: '1000_participations', title: 'Meldungs-Gott', description: '1000 Meldungen! Du bist eine lebende Legende.', icon: '💎', condition: (p) => p.history.filter(h => h.type === 'participation').length >= 1000 },
+
+  // --- Noten & Fächer (24) ---
   { id: 'first_grade_1', title: 'Musterschüler', description: 'Du hast deine erste 1 geschrieben.', icon: '🌟', condition: (p) => p.history.some(h => h.type === 'grade' && h.value === 1) },
   { id: '3_grades_1', title: 'Streber', description: 'Du hast schon drei 1er geschrieben.', icon: '🤓', condition: (p) => p.history.filter(h => h.type === 'grade' && h.value === 1).length >= 3 },
+  { id: '5_grades_1', title: 'Noten-Sammler', description: 'Fünf Einsen! Dein Zeugnis wird glänzen.', icon: '✨', condition: (p) => p.history.filter(h => h.type === 'grade' && h.value === 1).length >= 5 },
+  { id: '10_grades_1', title: 'Einsen-Maschine', description: 'Zehn Mal die Bestnote. Wie machst du das?', icon: '🦾', condition: (p) => p.history.filter(h => h.type === 'grade' && h.value === 1).length >= 10 },
+  { id: '25_grades_1', title: 'Perfektionist', description: '25 Einsen! Du bist unschlagbar.', icon: '🏅', condition: (p) => p.history.filter(h => h.type === 'grade' && h.value === 1).length >= 25 },
+  { id: '50_grades_1', title: 'Überflieger', description: '50 Einsen! Du brauchst ein größeres Regal für Urkunden.', icon: '🏆', condition: (p) => p.history.filter(h => h.type === 'grade' && h.value === 1).length >= 50 },
+  { id: '10_grades_2', title: 'Solider Zweier', description: 'Du hast zehn Mal eine 2 geschrieben.', icon: '🥈', condition: (p) => p.history.filter(h => h.type === 'grade' && h.value === 2).length >= 10 },
+  { id: '25_grades_not_bad', title: 'Keine Aussetzer', description: '25 Noten eingetragen, die 3 oder besser sind.', icon: '🛡️', condition: (p) => p.history.filter(h => h.type === 'grade' && Number(h.value) <= 3).length >= 25 },
   { id: 'first_grade_improve', title: 'Comeback', description: 'Eine 3 oder besser geschrieben.', icon: '📈', condition: (p) => p.history.some(h => h.type === 'grade' && h.value !== undefined && Number(h.value) <= 3) },
+  { id: 'improve_twice', title: 'Aufwärtstrend', description: 'Zwei Mal hintereinander verbessert.', icon: '🎢', condition: (p) => {
+    const grades = p.history.filter(h => h.type === 'grade');
+    if (grades.length < 2) return false;
+    return Number(grades[0].value) <= Number(grades[1].value);
+  }},
+  { id: 'subject_math', title: 'Mathe-Genie', description: 'Eine 1 in Mathematik.', icon: '📐', condition: (p) => p.history.some(h => h.type === 'grade' && h.value === 1 && h.subject?.toLowerCase().includes('mathe')) },
+  { id: 'subject_german', title: 'Dichter & Denker', description: 'Eine 1 in Deutsch.', icon: '🖋️', condition: (p) => p.history.some(h => h.type === 'grade' && h.value === 1 && h.subject?.toLowerCase().includes('deutsch')) },
+  { id: 'subject_english', title: 'Native Speaker', description: 'Eine 1 in Englisch.', icon: '🇬🇧', condition: (p) => p.history.some(h => h.type === 'grade' && h.value === 1 && h.subject?.toLowerCase().includes('englisch')) },
+  { id: 'subject_science', title: 'Forscher', description: 'Eine 1 in Bio, Physik oder Chemie.', icon: '🧪', condition: (p) => p.history.some(h => h.type === 'grade' && h.value === 1 && (h.subject?.toLowerCase().includes('bio') || h.subject?.toLowerCase().includes('physik') || h.subject?.toLowerCase().includes('chemie'))) },
+  { id: 'subject_history', title: 'Zeitmanager', description: 'Eine 1 in Geschichte.', icon: '⏳', condition: (p) => p.history.some(h => h.type === 'grade' && h.value === 1 && h.subject?.toLowerCase().includes('geschicht')) },
+  { id: 'subject_geography', title: 'Weltenbummler', description: 'Eine 1 in Erdkunde/Geographie.', icon: '🌍', condition: (p) => p.history.some(h => h.type === 'grade' && h.value === 1 && (h.subject?.toLowerCase().includes('erdkunde') || h.subject?.toLowerCase().includes('geo'))) },
+  { id: 'subject_art', title: 'Picasso', description: 'Eine 1 in Kunst.', icon: '🎨', condition: (p) => p.history.some(h => h.type === 'grade' && h.value === 1 && h.subject?.toLowerCase().includes('kunst')) },
+  { id: 'subject_music', title: 'Virtuose', description: 'Eine 1 in Musik.', icon: '🎵', condition: (p) => p.history.some(h => h.type === 'grade' && h.value === 1 && h.subject?.toLowerCase().includes('musik')) },
+  { id: 'subject_pe', title: 'Athlet', description: 'Eine 1 in Sport.', icon: '🏃', condition: (p) => p.history.some(h => h.type === 'grade' && h.value === 1 && h.subject?.toLowerCase().includes('sport')) },
+  { id: 'subject_religion', title: 'Heiligenschein', description: 'Eine 1 in Religion oder Ethik.', icon: '🕊️', condition: (p) => p.history.some(h => h.type === 'grade' && h.value === 1 && (h.subject?.toLowerCase().includes('reli') || h.subject?.toLowerCase().includes('ethik'))) },
+  { id: 'total_grades_10', title: 'Ergebnis-Sammler', description: '10 Noten eingetragen.', icon: '📁', condition: (p) => p.history.filter(h => h.type === 'grade').length >= 10 },
+  { id: 'total_grades_25', title: 'Archivar', description: '25 Noten eingetragen.', icon: '📦', condition: (p) => p.history.filter(h => h.type === 'grade').length >= 25 },
+  { id: 'total_grades_50', title: 'Zahlenjongleur', description: '50 Noten eingetragen.', icon: '🤹', condition: (p) => p.history.filter(h => h.type === 'grade').length >= 50 },
+  { id: 'grade_variety', title: 'Allrounder', description: 'Noten in 8 verschiedenen Fächern.', icon: '🌈', condition: (p) => new Set(p.history.filter(h => h.type === 'grade').map(h => h.subject)).size >= 8 },
+
+  // --- Challenges (10) ---
+  { id: '5_challenges', title: 'Anfänger-Glück', description: '5 Daily Challenges geschafft.', icon: '🌱', condition: (p) => p.history.filter(h => h.type === 'challenge').length >= 5 },
   { id: '10_challenges', title: 'Herausforderer', description: 'Du hast 10 Daily Challenges geschafft.', icon: '⚔️', condition: (p) => p.history.filter(h => h.type === 'challenge').length >= 10 },
+  { id: '25_challenges', title: 'Konsequent', description: '25 Daily Challenges gemeistert.', icon: '🛡️', condition: (p) => p.history.filter(h => h.type === 'challenge').length >= 25 },
   { id: '50_challenges', title: 'Challenge-Meister', description: 'Du hast 50 Daily Challenges gemeistert!', icon: '🎯', condition: (p) => p.history.filter(h => h.type === 'challenge').length >= 50 },
-  { id: 'first_schedule', title: 'Organisiert', description: 'Du hast ein Fach in deinen Stundenplan eingetragen.', icon: '📅', condition: (p) => Object.values(p.schedule).some((day: any) => day && day.length > 0) },
-  { id: 'full_schedule_day', title: 'Voller Tag', description: 'Du hast 5 Fächer an einem Tag.', icon: '🎒', condition: (p) => Object.values(p.schedule).some((day: any) => day && day.length >= 5) },
+  { id: '75_challenges', title: 'Zielstrebig', description: '75 Daily Challenges in der Täsch.', icon: '🏹', condition: (p) => p.history.filter(h => h.type === 'challenge').length >= 75 },
+  { id: '100_challenges', title: 'Hundert-Heros', description: '100 Daily Challenges! Wow!', icon: '💯', condition: (p) => p.history.filter(h => h.type === 'challenge').length >= 100 },
+  { id: '150_challenges', title: 'Ausdauernd', description: '150 Challenges. Du gibst nie auf.', icon: '🔋', condition: (p) => p.history.filter(h => h.type === 'challenge').length >= 150 },
+  { id: '200_challenges', title: 'Profi-Herausforderer', description: '200 Challenges gemeistert.', icon: '🎩', condition: (p) => p.history.filter(h => h.type === 'challenge').length >= 200 },
+  { id: '300_challenges', title: 'Challenge-Gott', description: '300 Challenges. Ein wahres Vorbild.', icon: '🕍', condition: (p) => p.history.filter(h => h.type === 'challenge').length >= 300 },
+  { id: '500_challenges', title: 'Unbesiegbar', description: '500 Challenges. Du hast das Spiel durchgespielt.', icon: '♾️', condition: (p) => p.history.filter(h => h.type === 'challenge').length >= 500 },
+
+  // --- Streaks (12) ---
   { id: 'streak_3', title: 'Am Ball bleiben', description: 'Du warst 3 Tage in Folge aktiv.', icon: '🔥', condition: (p) => p.streak >= 3 },
   { id: 'streak_7', title: 'Wochenmeister', description: 'Du warst 7 Tage in Folge aktiv.', icon: '📅', condition: (p) => p.streak >= 7 },
   { id: 'streak_14', title: 'Halbzeit', description: 'Du warst 14 Tage in Folge aktiv.', icon: '⏱️', condition: (p) => p.streak >= 14 },
+  { id: 'streak_21', title: 'Routine', description: '21 Tage. Es ist jetzt eine Gewohnheit.', icon: '🔄', condition: (p) => p.streak >= 21 },
   { id: 'streak_30', title: 'Unaufhaltsam', description: 'Ein ganzer Monat ununterbrochen aktiv!', icon: '🏆', condition: (p) => p.streak >= 30 },
+  { id: 'streak_60', title: 'Doppel-Monat', description: '60 Tage Streak! Beeindruckend.', icon: '💎', condition: (p) => p.streak >= 60 },
+  { id: 'streak_90', title: 'Quartal', description: '90 Tage. Ein Vierteljahr Motivation.', icon: '🧱', condition: (p) => p.streak >= 90 },
   { id: 'streak_100', title: 'Legende', description: '100 Tage in Folge aktiv!', icon: '👑', condition: (p) => p.streak >= 100 },
+  { id: 'streak_150', title: 'Eisern', description: '150 Tage ohne Pause. Wahnsinn.', icon: '🧊', condition: (p) => p.streak >= 150 },
+  { id: 'streak_180', title: 'Halbes Jahr', description: '180 Tage Streak! Du bist verrückt!', icon: '🌓', condition: (p) => p.streak >= 180 },
+  { id: 'streak_250', title: 'Marathon', description: '250 Tage. Fast geschafft!', icon: '🏃', condition: (p) => p.streak >= 250 },
+  { id: 'streak_365', title: 'Ein Jahr Road to Success', description: '365 Tage am Stück! Ein echtes Jahr voller Erfolg.', icon: '🎆', condition: (p) => p.streak >= 365 },
+
+  // --- Punkte & Ränge (9) ---
   { id: 'rank_2', title: 'Aufsteiger', description: 'Du hast den zweiten Rang erreicht.', icon: '🚀', condition: (p) => p.points >= 500 },
+  { id: 'rank_3', title: 'Fortgeschritten', description: 'Rang 3 erreicht.', icon: '🎖️', condition: (p) => p.points >= 1500 },
+  { id: 'rank_4', title: 'Intelektuell', description: 'Rang 4 erreicht.', icon: '🧠', condition: (p) => p.points >= 3500 },
+  { id: 'rank_5', title: 'Meister', description: 'Rang 5 erreicht.', icon: '🔱', condition: (p) => p.points >= 7000 },
+  { id: 'rank_6', title: 'Genie', description: 'Den höchsten Rang erreicht!', icon: '🌌', condition: (p) => p.points >= 15000 },
   { id: 'points_10k', title: 'Punktestand über 9000!', description: 'Du hast über 9000 Punkte gesammelt.', icon: '🔥', condition: (p) => p.points >= 9001 },
   { id: 'points_50k', title: 'Highscore', description: 'Du hast 50.000 Punkte gesammelt.', icon: '💰', condition: (p) => p.points >= 50000 },
+  { id: 'points_100k', title: 'Sechsstellig', description: '100.000 Punkte! Unglaublich.', icon: '🏦', condition: (p) => p.points >= 100000 },
+  { id: 'points_500k', title: 'Halbe Millionär', description: '500.000 Punkte gesammelt.', icon: '💸', condition: (p) => p.points >= 500000 },
+
+  // --- Tagebuch & Reflexion (10) ---
   { id: 'first_diary', title: 'Tagebuchschreiber', description: 'Du hast deinen ersten Tagebucheintrag geschrieben.', icon: '📓', condition: (p) => !!p.diary && p.diary.length >= 1 },
   { id: '7_diary', title: 'Reflektiert', description: 'Du hast 7 Tagebucheinträge verfasst.', icon: '✍️', condition: (p) => !!p.diary && p.diary.length >= 7 },
+  { id: '15_diary', title: 'Gedankensammler', description: '15 Tagebucheinträge.', icon: '💭', condition: (p) => !!p.diary && p.diary.length >= 15 },
   { id: '30_diary', title: 'Chronist', description: '30 Tagebucheinträge! Gibst du bald ein Buch heraus?', icon: '📚', condition: (p) => !!p.diary && p.diary.length >= 30 },
+  { id: '50_diary', title: 'Blogger', description: '50 Einträge verfasst.', icon: '💻', condition: (p) => !!p.diary && p.diary.length >= 50 },
+  { id: '100_diary', title: 'Autor', description: '100 Tagebucheinträge! Eine stolze Sammlung.', icon: '🖋️', condition: (p) => !!p.diary && p.diary.length >= 100 },
+  { id: '150_diary', title: 'Tiefgründig', description: '150 Einträge.', icon: '🕳️', condition: (p) => !!p.diary && p.diary.length >= 150 },
+  { id: '200_diary', title: 'Philosoph', description: '200 Einträge im Tagebuch.', icon: '🧘', condition: (p) => !!p.diary && p.diary.length >= 200 },
+  { id: '250_diary', title: 'Weiser', description: '250 Einträge.', icon: '📜', condition: (p) => !!p.diary && p.diary.length >= 250 },
+  { id: '365_diary', title: 'Ein Jahr Reflexion', description: '365 Tagebucheinträge. Du kennst dich selbst am besten.', icon: '🗿', condition: (p) => !!p.diary && p.diary.length >= 365 },
+
+  // --- Prognosen (5) ---
   { id: 'first_estimation', title: 'Wahrsager', description: 'Du hast deine erste Noten-Prognose gemacht.', icon: '🔮', condition: (p) => !!p.estimatedGrades && Object.keys(p.estimatedGrades).length >= 1 },
   { id: '5_estimations', title: 'Zukunftsblick', description: 'Du hast Prognosen für 5 verschiedene Fächer abgegeben.', icon: '👁️', condition: (p) => !!p.estimatedGrades && Object.keys(p.estimatedGrades).length >= 5 },
+  { id: '10_estimations', title: 'Analyst', description: 'Prognosen für 10 Fächer.', icon: '📊', condition: (p) => !!p.estimatedGrades && Object.keys(p.estimatedGrades).length >= 10 },
+  { id: '15_estimations', title: 'Vorhersehung', description: 'Prognosen für 15 Fächer.', icon: '🌌', condition: (p) => !!p.estimatedGrades && Object.keys(p.estimatedGrades).length >= 15 },
+  { id: '20_estimations', title: 'Orakel', description: 'Prognosen für 20 Fächer abgegeben.', icon: '⛩️', condition: (p) => !!p.estimatedGrades && Object.keys(p.estimatedGrades).length >= 20 },
+
+  // --- Fokus & Study Timer (10) ---
+  { id: 'first_focus', title: 'Fokusiert', description: 'Deine erste Fokus-Session beendet.', icon: '🧘', condition: (p) => p.history.some(h => h.type === 'challenge' && h.comment === 'Fokus-Session') },
+  { id: '5_focus', title: 'Konzentriert', description: '5 Fokus-Sessions absolviert.', icon: '🎯', condition: (p) => p.history.filter(h => h.type === 'challenge' && h.comment === 'Fokus-Session').length >= 5 },
+  { id: '10_focus', title: 'Tunnelblick', description: '10 Fokus-Sessions.', icon: '🚇', condition: (p) => p.history.filter(h => h.type === 'challenge' && h.comment === 'Fokus-Session').length >= 10 },
+  { id: '25_focus', title: 'Produktivitäts-Monster', description: '25 Fokus-Sessions.', icon: '👾', condition: (p) => p.history.filter(h => h.type === 'challenge' && h.comment === 'Fokus-Session').length >= 25 },
+  { id: '50_focus', title: 'Flow-Zustand', description: '50 Fokus-Sessions geschafft.', icon: '🌊', condition: (p) => p.history.filter(h => h.type === 'challenge' && h.comment === 'Fokus-Session').length >= 50 },
+  { id: '75_focus', title: 'Tiefenarbeit', description: '75 Fokus-Sessions.', icon: '💎', condition: (p) => p.history.filter(h => h.type === 'challenge' && h.comment === 'Fokus-Session').length >= 75 },
+  { id: '100_focus', title: 'Meister der Zeit', description: '100 Fokus-Sessions!', icon: '⏳', condition: (p) => p.history.filter(h => h.type === 'challenge' && h.comment === 'Fokus-Session').length >= 100 },
+  { id: '250_focus', title: 'Arbeitstier', description: '250 Fokus-Sessions. Du lebst förmlich am Schreibtisch.', icon: '🐗', condition: (p) => p.history.filter(h => h.type === 'challenge' && h.comment === 'Fokus-Session').length >= 250 },
+  { id: 'focus_night', title: 'Nachteule', description: 'Eine Fokus-Session nach 21 Uhr beendet.', icon: '🦉', condition: (p) => p.history.some(h => h.type === 'challenge' && h.comment === 'Fokus-Session' && new Date(h.date).getHours() >= 21) },
+  { id: 'focus_morning', title: 'Frühaufsteher', description: 'Eine Fokus-Session vor 8 Uhr morgens beendet.', icon: '🌅', condition: (p) => p.history.some(h => h.type === 'challenge' && h.comment === 'Fokus-Session' && new Date(h.date).getHours() <= 8) },
+
+  // --- Multiplayer & Verschiedenes (6) ---
+  { id: 'reached_bronze', title: 'Aufgeschlagen', description: 'Bronze Liga erreicht.', icon: '🥉', condition: (p) => !!p.multiplayer && p.multiplayer.leagueLevel >= 1 },
+  { id: 'reached_silver', title: 'Glänzend', description: 'Silber Liga erreicht.', icon: '🥈', condition: (p) => !!p.multiplayer && p.multiplayer.leagueLevel >= 2 },
+  { id: 'reached_gold', title: 'Goldschmied', description: 'Gold Liga erreicht.', icon: '🥇', condition: (p) => !!p.multiplayer && p.multiplayer.leagueLevel >= 3 },
+  { id: 'reached_platinum', title: 'Platin-Status', description: 'Platin Liga erreicht.', icon: '💎', condition: (p) => !!p.multiplayer && p.multiplayer.leagueLevel >= 4 },
+  { id: 'reached_legend', title: 'Legende der Liga', description: 'Legenden Liga erreicht. Zeig ihnen wer der Boss ist!', icon: '👺', condition: (p) => !!p.multiplayer && p.multiplayer.leagueLevel >= 6 },
+  { id: 'reached_god', title: 'Road to Success Gott', description: 'Du hast den Status eines Gottes erreicht.', icon: '⚡', condition: (p) => !!p.multiplayer && p.multiplayer.leagueLevel >= 12 },
+  { id: 'reached_infinity', title: 'Die Unendlichkeit', description: 'Du hast die letzte bekannte Liga erreicht. Was kommt jetzt?', icon: '♾️', condition: (p) => !!p.multiplayer && p.multiplayer.leagueLevel >= 15 },
+  { id: 'weekend_warrior', title: 'Wochenend-Krieger', description: 'Aktivität am Samstag oder Sonntag.', icon: '⚔️', condition: (p) => p.history.some(h => {
+    const day = new Date(h.date).getDay();
+    return day === 0 || day === 6;
+  }) },
 ];
 
 // --- Constants ---
@@ -204,7 +307,16 @@ const LEAGUES = [
   { level: 3, name: "Gold Liga", color: "text-yellow-500", bg: "bg-yellow-500/10", border: "border-yellow-500/20" },
   { level: 4, name: "Platin Liga", color: "text-cyan-500", bg: "bg-cyan-500/10", border: "border-cyan-500/20" },
   { level: 5, name: "Diamant Liga", color: "text-blue-500", bg: "bg-blue-500/10", border: "border-blue-500/20" },
-  { level: 6, name: "Legenden Liga", color: "text-purple-500", bg: "bg-purple-500/10", border: "border-purple-500/20" }
+  { level: 6, name: "Legenden Liga", color: "text-purple-600", bg: "bg-purple-600/10", border: "border-purple-600/20" },
+  { level: 7, name: "Titanen Liga", color: "text-indigo-600", bg: "bg-indigo-600/10", border: "border-indigo-600/20" },
+  { level: 8, name: "Meister Liga", color: "text-red-600", bg: "bg-red-600/10", border: "border-red-600/20" },
+  { level: 9, name: "Galaktische Liga", color: "text-blue-800", bg: "bg-blue-800/10", border: "border-blue-800/20" },
+  { level: 10, name: "Mystische Liga", color: "text-fuchsia-600", bg: "bg-fuchsia-600/10", border: "border-fuchsia-600/20" },
+  { level: 11, name: "Kosmische Liga", color: "text-rose-600", bg: "bg-rose-600/10", border: "border-rose-600/20" },
+  { level: 12, name: "Road to Success Gott", color: "text-yellow-600", bg: "bg-yellow-600/10", border: "border-yellow-600/20" },
+  { level: 13, name: "Absolute Existenz", color: "text-slate-900 dark:text-slate-100", bg: "bg-slate-900/10 dark:bg-slate-100/10", border: "border-slate-900/20 dark:border-slate-100/20" },
+  { level: 14, name: "Jenseits der Zeit", color: "text-cyan-600", bg: "bg-cyan-600/10", border: "border-cyan-600/20" },
+  { level: 15, name: "Unendlichkeit", color: "text-violet-600", bg: "bg-violet-600/10", border: "border-violet-600/20" }
 ];
 
 function getMonday(nowMs: number) {
@@ -365,7 +477,7 @@ function AuthScreen({ onAuth }: { onAuth: (username: string, profile: UserProfil
           <Trophy className="text-primary w-8 h-8" />
         </div>
         <h1 className="text-2xl font-display font-bold text-center text-slate-900 dark:text-white mb-2">
-          Klassenheld
+          Road to Success
         </h1>
         <p className="text-center text-sm text-slate-500 mb-8 font-medium">
           Sammle Punkte und werde zum Mastermind deiner Klasse.
@@ -527,7 +639,7 @@ export default function App() {
         let newStreak = prev.streak || 0;
         
         // Überprüfen, ob es überhaupt eingetragene Fächer im Stundenplan gibt
-        const hasAnySchedule = Object.values(prev.schedule).some(day => day && day.length > 0);
+        const hasAnySchedule = (Object.values(prev.schedule) as ScheduleSlot[][]).some(day => day && day.length > 0);
 
         // Zähle verpasste Schultage
         let missedSchoolDays = 0;
@@ -578,9 +690,15 @@ export default function App() {
   }, [authUsername]);
 
   const [isGradeModalOpen, setIsGradeModalOpen] = useState(false);
+  const [isParticipationConfirmOpen, setIsParticipationConfirmOpen] = useState(false);
+  const [pendingParticipationData, setPendingParticipationData] = useState<{mode: 'total' | 'subjects', total?: number, subjects?: Record<string, number>} | null>(null);
   const [gradeType, setGradeType] = useState<'vokabeltest' | 'test' | 'arbeit'>('arbeit');
   const [isPartModalOpen, setIsPartModalOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isDevMode, setIsDevMode] = useState(false);
+  const [devResetClicks, setDevResetClicks] = useState(0);
+  const [isDevPasswordModalOpen, setIsDevPasswordModalOpen] = useState(false);
+  const [devPasswordInput, setDevPasswordInput] = useState('');
   const [partMode, setPartMode] = useState<'total' | 'subject'>('total');
   const [partTotal, setPartTotal] = useState<number>(1);
   const [partSubjects, setPartSubjects] = useState<Record<string, number>>({});
@@ -653,27 +771,12 @@ export default function App() {
 
   const triggerCelebration = (title: string, subtitle?: string) => {
     setCelebrationInfo({ title, subtitle });
-    const myCanvas = document.createElement('canvas');
-    myCanvas.style.position = 'fixed';
-    myCanvas.style.inset = '0px';
-    myCanvas.style.width = '100vw';
-    myCanvas.style.height = '100vh';
-    myCanvas.style.zIndex = '9999';
-    myCanvas.style.pointerEvents = 'none';
-    document.body.appendChild(myCanvas);
-
-    const myConfetti = confetti.create(myCanvas, {
-      resize: true,
-      useWorker: true
-    });
-
-    myConfetti({
+    confetti({
       particleCount: 200,
       spread: 120,
       origin: { y: 0.6 },
+      zIndex: 9999,
       colors: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6']
-    }).then(() => {
-      myCanvas.remove();
     });
     setTimeout(() => setCelebrationInfo(null), 3500);
   };
@@ -759,7 +862,8 @@ export default function App() {
   const currentRankIndex = useMemo(() => {
     const sortedRanks = [...RANKS].sort((a, b) => b.min - a.min);
     const index = sortedRanks.findIndex(r => profile.points >= r.min);
-    return RANKS.indexOf(sortedRanks[index]);
+    const safeIndex = index === -1 ? sortedRanks.length - 1 : index;
+    return RANKS.indexOf(sortedRanks[safeIndex]);
   }, [profile.points]);
 
   const currentRank = RANKS[currentRankIndex];
@@ -964,6 +1068,37 @@ export default function App() {
     return Array.from(new Set(profile.schedule[validTodayIndex]?.map(s => s.subject) || []));
   }, [profile.schedule, validTodayIndex]);
 
+  const achievementProgress = useMemo(() => {
+    const unlockedCount = ACHIEVEMENTS.filter(a => a.condition(profile)).length;
+    return { unlocked: unlockedCount, total: ACHIEVEMENTS.length };
+  }, [profile]);
+
+  const sortedAchievements = useMemo(() => {
+    return [...ACHIEVEMENTS].sort((a, b) => {
+      const aUnlocked = a.condition(profile);
+      const bUnlocked = b.condition(profile);
+      if (aUnlocked && !bUnlocked) return -1;
+      if (!aUnlocked && bUnlocked) return 1;
+      return 0;
+    });
+  }, [profile]);
+
+  // --- Dev Mode Actions ---
+  const handleDevPointsChange = (amount: number) => {
+    setProfile(prev => ({ ...prev, points: prev.points + amount }));
+  };
+
+  const handleDevSkipDay = () => {
+    setProfile(prev => ({
+      ...prev,
+      streak: prev.streak + 1,
+      history: [
+        { id: Date.now().toString(), date: Date.now(), type: 'challenge', points: 0, value: 0, comment: 'Tag übersprungen (Dev)' },
+        ...prev.history
+      ].slice(0, 100)
+    }));
+  };
+
   // --- Actions ---
 
   const openPartModal = () => {
@@ -973,7 +1108,56 @@ export default function App() {
     setPartSubjects({});
   };
 
-  const submitParticipation = () => {
+  const submitParticipation = (confirmed = false) => {
+    let totalToSubmit: number = 0;
+    if (partMode === 'total') {
+      totalToSubmit = partTotal;
+    } else {
+      totalToSubmit = (Object.values(partSubjects) as number[]).reduce((a, b) => a + (b || 0), 0);
+    }
+
+    if (totalToSubmit > 50 && !confirmed) {
+      setPendingParticipationData({
+        mode: partMode,
+        total: partTotal,
+        subjects: { ...partSubjects }
+      });
+      setIsParticipationConfirmOpen(true);
+      return;
+    }
+
+    // Check for penalty
+    const today = new Date().toISOString().split('T')[0];
+    const todayCount = profile.history
+      .filter(h => h.type === 'participation' && new Date(h.date).toISOString().split('T')[0] === today)
+      .length;
+
+    if (todayCount + totalToSubmit > 50) {
+      const highActivityDays = new Set(
+        profile.history
+          .filter(h => h.type === 'participation')
+          .map(h => new Date(h.date).toISOString().split('T')[0])
+          .filter(date => {
+             const count = profile.history.filter(h => h.type === 'participation' && new Date(h.date).toISOString().split('T')[0] === date).length;
+             return count > 50;
+          })
+      );
+      
+      // Add today if it exceeds 50
+      if (todayCount + totalToSubmit > 50) highActivityDays.add(today);
+
+      if (highActivityDays.size >= 5 && profile.multiplayer) {
+        setProfile(prev => ({
+          ...prev,
+          multiplayer: {
+            ...prev.multiplayer!,
+            leagueLevel: Math.max(0, prev.multiplayer!.leagueLevel - 2)
+          }
+        }));
+        triggerCelebration('Achtung!', 'Strafe wegen unnatürlicher Aktivität: -2 Ligen!');
+      }
+    }
+
     let newEntries: HistoryEntry[] = [];
     let earnedPoints = 0;
 
@@ -1012,7 +1196,7 @@ export default function App() {
        setProfile(prev => ({
          ...prev,
          points: prev.points + earnedPoints,
-         history: [...newEntries, ...prev.history].slice(0, 50)
+         history: [...newEntries, ...prev.history].slice(0, 100)
        }));
        if (newEntries.length >= 3) {
            triggerCelebration('Klasse!', `${newEntries.length} Meldungen eingetragen.`);
@@ -1020,6 +1204,8 @@ export default function App() {
     }
     
     setIsPartModalOpen(false);
+    setIsParticipationConfirmOpen(false);
+    setPendingParticipationData(null);
   };
 
   const addGradeResult = (grade: Grade) => {
@@ -1038,7 +1224,7 @@ export default function App() {
 
     setProfile(prev => ({
       ...prev,
-      points: Math.max(0, prev.points + points),
+      points: prev.points + points,
       history: [entry, ...prev.history].slice(0, 50)
     }));
 
@@ -1139,7 +1325,19 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 font-sans pb-32 transition-colors duration-300">
+    <div className={`min-h-screen bg-slate-50 dark:bg-slate-950 font-sans pb-32 transition-colors duration-300 ${isDevMode ? 'ring-[12px] ring-amber-500/10 ring-inset' : ''}`}>
+      {isDevMode && (
+        <div className="fixed top-0 left-0 right-0 z-[100] bg-amber-500 text-white text-[10px] font-black uppercase tracking-[0.2em] text-center py-1 flex items-center justify-center gap-4 px-4 overflow-hidden">
+          <motion.div animate={{ opacity: [0.4, 1, 0.4] }} transition={{ repeat: Infinity, duration: 2 }} className="flex items-center gap-1">
+            <Terminal className="w-3 h-3" />
+            DEVELOPER MODE ACTIVE — UNAUTHORIZED ACCESS PROHIBITED
+            <Terminal className="w-3 h-3" />
+          </motion.div>
+          <div className="flex-1 overflow-hidden whitespace-nowrap opacity-30 select-none hidden sm:block">
+            {Array(10).fill('DEBUG_SESSION_LOG_ENTRY_ID_0x7F2A_SYSTEM_OVERRIDE_ACTIVE').join(' | ')}
+          </div>
+        </div>
+      )}
       {/* Header */}
       <header className="bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 sticky top-0 z-40 px-4 py-4 md:px-8">
         <div className="max-w-2xl mx-auto flex items-center justify-between">
@@ -1684,8 +1882,26 @@ export default function App() {
               exit={{ opacity: 0, y: -10 }}
               className="space-y-6"
             >
+              {/* Progress Header */}
+              <div className="card p-6 flex items-center justify-between shadow-sm">
+                <div>
+                  <h3 className="text-xl font-bold font-display text-slate-800 dark:text-white">Deine Erfolge</h3>
+                  <p className="text-sm text-slate-500 font-medium">{achievementProgress.unlocked} von {achievementProgress.total} freigeschaltet</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="w-32 h-2.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                    <motion.div 
+                      initial={{ width: 0 }}
+                      animate={{ width: `${(achievementProgress.unlocked / achievementProgress.total) * 100}%` }}
+                      className="h-full bg-primary"
+                    />
+                  </div>
+                  <span className="text-sm font-bold text-primary">{Math.round((achievementProgress.unlocked / achievementProgress.total) * 100)}%</span>
+                </div>
+              </div>
+
               <section className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {ACHIEVEMENTS.map((achievement) => {
+                {sortedAchievements.map((achievement) => {
                   const unlocked = achievement.condition(profile);
                   return (
                     <div 
@@ -1754,7 +1970,7 @@ export default function App() {
                    <span className="flex-none">Wochenpunkte</span>
                 </div>
                 {multiplayerStandings.map((player, index) => (
-                  <div key={player.name} className={`flex items-center justify-between p-4 rounded-2xl border-2 transition-all duration-300 relative overflow-hidden hover:shadow-md hover:-translate-y-0.5 ${
+                  <div key={`${player.name}-${index}`} className={`flex items-center justify-between p-4 rounded-2xl border-2 transition-all duration-300 relative overflow-hidden hover:shadow-md hover:-translate-y-0.5 ${
                      player.isUser ? 'bg-primary/10 border-primary/30 shadow-md' : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800'
                   }`}>
                     {index < 3 && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-green-500 rounded-l-2xl"></div>}
@@ -1781,6 +1997,77 @@ export default function App() {
               </div>
             </motion.div>
           )}
+
+          {activeTab === 'dev' && isDevMode && (
+            <motion.div 
+              key="dev"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="space-y-6"
+            >
+              <div className="card p-8 bg-slate-900 text-white border-none shadow-2xl relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-4 opacity-10">
+                  <Terminal size={120} />
+                </div>
+                <h2 className="text-3xl font-display font-black uppercase tracking-tighter mb-2 italic">Developer Console</h2>
+                <p className="text-slate-400 font-mono text-sm">v1.2.0-debug | root@road-to-success</p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="card p-6 space-y-4">
+                  <h3 className="font-bold flex items-center gap-2">
+                    <Zap className="text-amber-500 w-5 h-5" />
+                    Wirtschaft & Punkte
+                  </h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button onClick={() => handleDevPointsChange(100)} className="py-2 px-3 bg-slate-100 dark:bg-slate-800 rounded-xl font-bold hover:bg-primary hover:text-white transition-all text-xs">+100</button>
+                    <button onClick={() => handleDevPointsChange(1000)} className="py-2 px-3 bg-slate-100 dark:bg-slate-800 rounded-xl font-bold hover:bg-primary hover:text-white transition-all text-xs">+1k</button>
+                    <button onClick={() => handleDevPointsChange(10000)} className="py-2 px-3 bg-slate-100 dark:bg-slate-800 rounded-xl font-bold hover:bg-primary hover:text-white transition-all text-xs">+10k</button>
+                    <button onClick={() => handleDevPointsChange(-1000)} className="py-2 px-3 bg-slate-100 dark:bg-slate-800 rounded-xl font-bold hover:bg-danger hover:text-white transition-all text-xs text-danger">-1k</button>
+                  </div>
+                </div>
+
+                <div className="card p-6 space-y-4">
+                  <h3 className="font-bold flex items-center gap-2">
+                    <Calendar className="text-primary w-5 h-5" />
+                    Zeit-Simulation
+                  </h3>
+                  <button onClick={handleDevSkipDay} className="w-full py-4 bg-slate-100 dark:bg-slate-800 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-primary/10 transition-all border-2 border-transparent hover:border-primary/20 group">
+                    <TrendingUp className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                    Tag überspringen (+1 Streak)
+                  </button>
+                </div>
+              </div>
+
+              <div className="card p-6 space-y-4">
+                <h3 className="font-bold text-danger flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5" />
+                  Gefahrenbereich
+                </h3>
+                <div className="p-4 bg-danger/5 border border-danger/20 rounded-2xl">
+                  <p className="text-xs text-danger font-medium">Diese Aktionen verändern die Datenbank permanent.</p>
+                </div>
+                <button 
+                  onClick={() => {
+                    if (devResetClicks < 4) {
+                      setDevResetClicks(prev => prev + 1);
+                    } else {
+                      const confirmReset = window.confirm("Bist du sicher, dass du alle Daten löschen willst? Dies kann nicht rückgängig gemacht werden.");
+                      if (confirmReset) {
+                        localStorage.clear();
+                        window.location.reload();
+                      } else {
+                        setDevResetClicks(0);
+                      }
+                    }
+                  }}
+                  className="w-full py-4 border-2 border-danger/20 text-danger font-bold rounded-2xl hover:bg-danger hover:text-white transition-all"
+                >
+                  Hard Reset (Local Data) {devResetClicks > 0 && `(${5 - devResetClicks} Klicks übrig)`}
+                </button>
+              </div>
+            </motion.div>
+          )}
         </AnimatePresence>
       </main>
 
@@ -1790,8 +2077,10 @@ export default function App() {
           {[
             { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
             { id: 'schedule', icon: Calendar, label: 'Plan' },
+            { id: 'multiplayer', icon: Trophy, label: 'Ligen' },
             { id: 'stats', icon: BarChart3, label: 'Stats' },
             { id: 'achievements', icon: Medal, label: 'Erfolge' },
+            ...(isDevMode ? [{ id: 'dev', icon: Terminal, label: 'Dev' }] : []),
           ].map((tab) => (
             <button
               key={tab.id}
@@ -1837,7 +2126,7 @@ export default function App() {
                   <div className="w-8 h-8 bg-primary/10 rounded-lg flex items-center justify-center">
                     <Trophy className="text-primary w-5 h-5" />
                   </div>
-                  <span className="font-display font-bold text-lg text-slate-900 dark:text-white">Klassenheld</span>
+                  <span className="font-display font-bold text-lg text-slate-900 dark:text-white">Road to Success</span>
                 </div>
                 <button 
                   onClick={() => setIsSidebarOpen(false)}
@@ -1951,6 +2240,48 @@ export default function App() {
                     <Hand className="w-5 h-5" />
                     Eintragen
                   </span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Participation Confirm Modal */}
+        {isParticipationConfirmOpen && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-sm w-full shadow-2xl border border-slate-200 dark:border-slate-800"
+            >
+              <div className="w-16 h-16 bg-amber-100 dark:bg-amber-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                <AlertTriangle className="text-amber-600 w-8 h-8" />
+              </div>
+              <h2 className="text-xl font-bold text-center mb-2">Bist du dir sicher?</h2>
+              <p className="text-slate-500 dark:text-slate-400 text-center mb-6">
+                Du möchtest <span className="font-bold text-slate-900 dark:text-white">
+                  {pendingParticipationData?.mode === 'total' 
+                    ? pendingParticipationData.total 
+                    : Object.values(pendingParticipationData?.subjects || {}).reduce((a: number, b) => a + (Number(b) || 0), 0)} Meldungen
+                </span> eintragen. Das ist eine ungewöhnlich hohe Anzahl für einen Tag.
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <button 
+                  onClick={() => {
+                    setIsParticipationConfirmOpen(false);
+                    setPendingParticipationData(null);
+                  }}
+                  className="py-3 px-4 rounded-xl font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 transition-colors"
+                >
+                  Nein, korrigieren
+                </button>
+                <button 
+                  onClick={() => {
+                    submitParticipation(true);
+                  }}
+                  className="py-3 px-4 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all"
+                >
+                  Ja, eintragen
                 </button>
               </div>
             </motion.div>
@@ -2126,7 +2457,24 @@ export default function App() {
                   <Download className="w-5 h-5" />
                   App herunterladen (APK/PWA)
                 </button>
-                <div className="pt-4 mt-2 border-t border-slate-100 dark:border-slate-800">
+                <div className="pt-4 mt-2 border-t border-slate-100 dark:border-slate-800 space-y-3">
+                  {!isDevMode ? (
+                    <button 
+                      onClick={() => { setIsDevPasswordModalOpen(true); }}
+                      className="w-full flex items-center justify-center gap-2 text-slate-400 font-bold py-2 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer text-sm"
+                    >
+                      <Terminal className="w-4 h-4" />
+                      Developer Mode aktivieren
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={() => setIsDevMode(false)}
+                      className="w-full flex items-center justify-center gap-2 text-amber-500 font-bold py-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 transition-all cursor-pointer"
+                    >
+                      <Zap className="w-5 h-5 fill-current" />
+                      Developer Mode beenden
+                    </button>
+                  )}
                   <button 
                     onClick={() => { setIsSettingsOpen(false); logout(); }}
                     className="w-full text-danger font-bold py-3 rounded-2xl hover:bg-danger/10 transition-all cursor-pointer"
@@ -2134,6 +2482,55 @@ export default function App() {
                     Abmelden (@{authUsername})
                   </button>
                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Developer Mode Password Modal */}
+        {isDevPasswordModalOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="bg-white dark:bg-slate-900 rounded-3xl p-8 max-w-sm w-full shadow-2xl border border-slate-200 dark:border-slate-800"
+            >
+              <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-6">
+                <Terminal className="text-primary w-8 h-8" />
+              </div>
+              <h2 className="text-2xl font-bold text-center mb-2">Entwicklerzugang</h2>
+              <p className="text-slate-500 dark:text-slate-400 text-center mb-6 text-sm">
+                Bitte gib das Administrator-Passwort ein, um den Developer Mode freizuschalten.
+              </p>
+              <input 
+                type="password"
+                placeholder="Passwort"
+                value={devPasswordInput}
+                onChange={(e) => setDevPasswordInput(e.target.value)}
+                className="w-full px-4 py-4 bg-slate-50 dark:bg-slate-800 dark:text-white border-2 border-transparent focus:border-primary/30 rounded-2xl mb-4 outline-none font-mono"
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <button 
+                  onClick={() => setIsDevPasswordModalOpen(false)}
+                  className="py-4 px-4 rounded-2xl font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+                >
+                  Abbrechen
+                </button>
+                <button 
+                  onClick={() => {
+                    if (devPasswordInput === 'dev12pas') {
+                      setIsDevMode(true);
+                      setIsDevPasswordModalOpen(false);
+                      setDevPasswordInput('');
+                      triggerCelebration('Dev Mode aktiv!', 'Willkommen, Administrator.');
+                    } else {
+                      triggerCelebration('Falsches Passwort', 'Zugriff verweigert.');
+                    }
+                  }}
+                  className="py-4 px-4 rounded-2xl font-bold bg-primary text-white"
+                >
+                  Bestätigen
+                </button>
               </div>
             </motion.div>
           </div>
@@ -2171,7 +2568,7 @@ export default function App() {
                 <div className="bg-primary/5 border border-primary/20 p-4 rounded-2xl">
                   <p className="text-sm font-semibold mb-2 text-primary">Direkter PWA-Download (Empfohlen)</p>
                   <p className="text-sm">
-                    Du musst keine schwere APK herunterladen! Klassenheld funktioniert als <b>Progressive Web App (PWA)</b> und lässt sich wie eine native App nutzen.
+                    Du musst keine schwere APK herunterladen! Road to Success funktioniert als <b>Progressive Web App (PWA)</b> und lässt sich wie eine native App nutzen.
                   </p>
                   <ul className="text-sm mt-3 space-y-2 list-disc list-inside">
                     <li><b>Android (Chrome):</b> Tippe oben auf die 3 Punkte und wähle <span className="font-bold">„Zum Startbildschirm zufügen“</span> (oder „App installieren“).</li>
