@@ -2468,7 +2468,10 @@ export default function App() {
                     </button>
                   ) : (
                     <button 
-                      onClick={() => setIsDevMode(false)}
+                      onClick={() => {
+                        setIsDevMode(false);
+                        setDevResetClicks(0);
+                      }}
                       className="w-full flex items-center justify-center gap-2 text-amber-500 font-bold py-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 transition-all cursor-pointer"
                     >
                       <Zap className="w-5 h-5 fill-current" />
