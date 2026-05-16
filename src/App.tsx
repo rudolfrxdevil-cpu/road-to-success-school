@@ -44,7 +44,8 @@ import {
   Play,
   Pause,
   RotateCcw,
-  Dumbbell
+  Dumbbell,
+  Globe
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -90,6 +91,8 @@ interface BotData {
 interface MultiplayerData {
   leagueLevel: number;
   weekStart: number;
+  lastChallengeUpdateDate?: number;
+  onlineChallenges?: BotOnlineChallenge[];
   lastResults?: {
      promoted: boolean;
      relegated: boolean;
@@ -116,6 +119,18 @@ interface PersonalGoal {
   lastClaimedAt?: number;
 }
 
+interface BotOnlineChallenge {
+  id: string;
+  host: string;
+  type: 'grade_1' | 'participations' | 'practice' | 'custom';
+  title: string;
+  description: string;
+  rewardPoints: number;
+  target: number;
+  subject?: string;
+  participants: { name: string; score: number; isBot: boolean }[];
+}
+
 interface UserProfile {
   name: string;
   gradeLevel: string;
@@ -132,7 +147,7 @@ interface UserProfile {
   goals?: PersonalGoal[];
 }
 
-type Tab = 'dashboard' | 'schedule' | 'stats' | 'achievements' | 'multiplayer' | 'dev';
+type Tab = 'dashboard' | 'schedule' | 'stats' | 'achievements' | 'multiplayer' | 'online-challenges' | 'dev';
 
 interface Achievement {
   id: string;
@@ -163,6 +178,23 @@ const getGoalReward = (goal: PersonalGoal) => {
   return 0;
 };
 
+const getOnlineChallengeScore = (profile: UserProfile, challenge: BotOnlineChallenge): number => {
+  if (!profile.multiplayer) return 0;
+  const start = profile.multiplayer.weekStart;
+  const history = profile.history.filter(h => h.date >= start);
+  
+  if (challenge.type === 'grade_1') {
+    return history.filter(h => h.type === 'grade' && h.value === 1).length;
+  }
+  if (challenge.type === 'practice') {
+    return history.filter(h => h.type === 'challenge' && h.comment === 'Fokus-Session')
+      .reduce((acc, h) => acc + (h.focusDuration || 0), 0);
+  }
+  if (challenge.type === 'participations') {
+    return history.filter(h => h.type === 'participation').length;
+  }
+  return 0;
+};
 const getGoalProgress = (goal: PersonalGoal, profile: UserProfile) => {
   const periodStart = getPeriodStart(goal.period);
   const relevantHistory = profile.history.filter(h => h.date >= periodStart);
@@ -527,16 +559,11 @@ function initMultiplayerData(leagueLevel: number, weekStart: number): Multiplaye
   const shuffledNames = [...BOT_NAMES].sort(() => 0.5 - Math.random());
   for(let i=0; i<9; i++) {
     const dailyPoints = [];
-    // Die Punkte skalieren mit steigender Liga immer stärker (exponentiell)
-    // Level 0: ~35 Avg, Level 6: ~270 Avg
     const avgPointsPerDay = 20 + Math.pow(1.6, leagueLevel) * 15; 
-    
-    // Damit nicht alle gleich stark sind, bekommt jeder Bot einen kleinen Multiplikator
-    const botSkillModifier = 0.7 + (Math.random() * 0.6); // 0.7 bis 1.3
+    const botSkillModifier = 0.7 + (Math.random() * 0.6); 
     
     for(let d=0; d<7; d++) {
       if (Math.random() < 0.2) {
-         // An manchen Tagen macht der Bot eine Pause
          dailyPoints.push(0);
       } else {
          const pts = Math.floor(Math.random() * avgPointsPerDay * botSkillModifier * 1.5);
@@ -548,10 +575,60 @@ function initMultiplayerData(leagueLevel: number, weekStart: number): Multiplaye
       dailyPoints
     });
   }
+
+  // Generate 100 Initial Online Challenges
+  const SUBJECTS = ['Englisch', 'Mathe', 'Deutsch', 'Geschichte', 'Physik', 'Chemie', 'Biologie', 'Informatik', 'Kunst', 'Musik', 'Sport'];
+  const challengeDefinitions = [
+    { type: 'participations', targets: [10, 25, 50, 100], rewardMult: 10 },
+    { type: 'practice', targets: [60, 120, 300, 600], rewardMult: 2 },
+    { type: 'grade_1', targets: [1, 2, 3, 5], rewardMult: 100 },
+  ];
+  
+  const onlineChallenges: BotOnlineChallenge[] = [];
+  for (let i = 0; i < 100; i++) {
+    const def = challengeDefinitions[Math.floor(Math.random() * challengeDefinitions.length)];
+    const target = def.targets[Math.floor(Math.random() * def.targets.length)];
+    const isSubjectSpecific = Math.random() > 0.4;
+    const subject = isSubjectSpecific ? SUBJECTS[Math.floor(Math.random() * SUBJECTS.length)] : undefined;
+    const host = shuffledNames[i % shuffledNames.length];
+    
+    let title = '';
+    let description = '';
+    if (def.type === 'participations') {
+       title = subject ? `${subject} Experte` : `Melde-Maschine`;
+       description = `Melde dich ${target} mal ${subject ? `in ${subject}` : 'im Unterricht'}.`;
+    } else if (def.type === 'practice') {
+       title = subject ? `${subject} Fokus` : `Lern-Marathon`;
+       description = `Übe für ${target} Minuten ${subject ? `in ${subject}` : 'insgesamt'}.`;
+    } else if (def.type === 'grade_1') {
+       title = subject ? `${subject} Genie` : `Top-Schüler`;
+       description = `Schreibe ${target} mal eine Eins ${subject ? `in ${subject}` : ''}.`;
+    }
+
+    const participants = bots.slice(0, 2 + Math.floor(Math.random() * 5)).map(b => ({
+       name: b.name,
+       score: Math.floor(Math.random() * target * 0.4), // start with some progress
+       isBot: true
+    }));
+    
+    onlineChallenges.push({
+      id: `chal_${Date.now()}_${i}`,
+      host,
+      type: def.type as any,
+      target,
+      subject,
+      title,
+      description,
+      rewardPoints: target * def.rewardMult,
+      participants
+    });
+  }
+
   return {
     leagueLevel,
     weekStart,
-    bots
+    bots,
+    onlineChallenges
   };
 }
 
@@ -815,6 +892,32 @@ export default function App() {
           const newData = initMultiplayerData(newLevel, currentWeekStart);
           newData.lastResults = { promoted, relegated, rank: userRank, leagueName };
           
+          let additionalPoints = 0;
+          let wonChallenges = 0;
+          let newHistoryItems: any[] = [];
+          
+          if (prev.multiplayer.onlineChallenges) {
+            prev.multiplayer.onlineChallenges.forEach(chal => {
+               // Calculate final score
+               const userScore = getOnlineChallengeScore(prev, chal);
+               const displayParticipants = [...chal.participants, { name: prev.name, score: userScore, isBot: false }]
+                   .sort((a,b) => b.score - a.score);
+                   
+               if (displayParticipants[0] && !displayParticipants[0].isBot) {
+                  wonChallenges++;
+                  additionalPoints += chal.rewardPoints;
+                  newHistoryItems.push({
+                    id: Math.random().toString(36).substr(2, 9),
+                    type: 'challenge',
+                    value: 1,
+                    date: currentWeekStart - 1, // just before the new week
+                    points: chal.rewardPoints,
+                    comment: `Online Challenge gewonnen: ${chal.title}!`
+                  });
+               }
+            });
+          }
+          
           const newHistoryEntry = {
             date: currentWeekStart,
             rank: userRank,
@@ -825,7 +928,12 @@ export default function App() {
           };
           newData.leagueHistory = [...(prev.multiplayer.leagueHistory || []), newHistoryEntry].slice(-10);
           
-          return { ...prev, multiplayer: newData };
+          return { 
+            ...prev, 
+            points: prev.points + additionalPoints,
+            history: [...newHistoryItems, ...prev.history].slice(0, 100),
+            multiplayer: newData 
+          };
         }
         
         return prev;
@@ -847,6 +955,45 @@ export default function App() {
       }
     }
   }, [authUsername, profile.name, profile.lastRecapDate]);
+
+  // Daily bit simulation for global challenges
+  useEffect(() => {
+    if (authUsername) {
+      setProfile(prev => {
+        if (!prev.multiplayer || !prev.multiplayer.onlineChallenges || prev.multiplayer.onlineChallenges.length === 0) return prev;
+        
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+        const lastUpdate = prev.multiplayer.lastChallengeUpdateDate || 0;
+        
+        if (lastUpdate < today) {
+           const updatedChallenges = prev.multiplayer.onlineChallenges.map(chal => {
+               const newParticipants = chal.participants.map(p => {
+                   if (!p.isBot) return p;
+                   if (Math.random() < 0.1) {
+                      return { ...p, score: chal.target };
+                   } else {
+                      return { ...p, score: Math.min(chal.target, p.score + Math.floor(Math.random() * (chal.target * 0.25))) };
+                   }
+               });
+               return { ...chal, participants: newParticipants };
+           }).filter(chal => {
+               return !chal.participants.some(p => p.isBot && p.score >= chal.target);
+           });
+  
+           return {
+              ...prev,
+              multiplayer: {
+                 ...prev.multiplayer,
+                 onlineChallenges: updatedChallenges,
+                 lastChallengeUpdateDate: today
+              }
+           };
+        }
+        return prev;
+      });
+    }
+  }, [authUsername]);
 
   // Check and update streak
   useEffect(() => {
@@ -930,6 +1077,11 @@ export default function App() {
   const [devResetClicks, setDevResetClicks] = useState(0);
   const [isDevPasswordModalOpen, setIsDevPasswordModalOpen] = useState(false);
   const [devPasswordInput, setDevPasswordInput] = useState('');
+  
+  const [isChallengeProgressModalOpen, setIsChallengeProgressModalOpen] = useState(false);
+  const [selectedChallengeId, setSelectedChallengeId] = useState<string | null>(null);
+  const [challengeProgressInput, setChallengeProgressInput] = useState<number>(0);
+  
   const [partMode, setPartMode] = useState<'total' | 'subject'>('total');
   const [partTotal, setPartTotal] = useState<number>(1);
   const [partSubjects, setPartSubjects] = useState<Record<string, number>>({});
@@ -1682,6 +1834,93 @@ export default function App() {
     if (confirm('Möchtest du dieses Ziel wirklich löschen?')) {
       setProfile(prev => ({ ...prev, goals: (prev.goals || []).filter(g => g.id !== id) }));
     }
+  };
+
+  const handleJoinChallenge = (chalId: string) => {
+    setProfile(prev => {
+      if (!prev.multiplayer || !prev.multiplayer.onlineChallenges) return prev;
+      const chals = prev.multiplayer.onlineChallenges.map(c => {
+         if (c.id === chalId) {
+            return {
+               ...c,
+               participants: [
+                 ...c.participants,
+                 { name: prev.name || "Du", score: 0, isBot: false }
+               ]
+            };
+         }
+         return c;
+      });
+      return { ...prev, multiplayer: { ...prev.multiplayer, onlineChallenges: chals } };
+    });
+  };
+
+  const handleSubmitChallengeProgress = () => {
+    if (!selectedChallengeId || challengeProgressInput <= 0) return;
+    
+    setProfile(prev => {
+       if (!prev.multiplayer || !prev.multiplayer.onlineChallenges) return prev;
+       let pointsEarned = 0;
+       let challengeTitle = '';
+       let challengeCompleted = false;
+
+       const chals = prev.multiplayer.onlineChallenges.map(c => {
+          if (c.id === selectedChallengeId) {
+             const userP = c.participants.find(p => !p.isBot);
+             if (userP) {
+                const newScore = userP.score + challengeProgressInput;
+                if (newScore >= c.target) {
+                   challengeCompleted = true;
+                   pointsEarned = c.rewardPoints;
+                   challengeTitle = c.title;
+                   return {
+                      ...c,
+                      participants: c.participants.map(p => !p.isBot ? { ...p, score: c.target } : p)
+                   };
+                } else {
+                   return {
+                      ...c,
+                      participants: c.participants.map(p => !p.isBot ? { ...p, score: newScore } : p)
+                   };
+                }
+             }
+          }
+          return c;
+       }).filter(c => {
+          if (c.id === selectedChallengeId && challengeCompleted) return false;
+          return true;
+       });
+
+       const nextPrev = {
+           ...prev,
+           multiplayer: {
+              ...prev.multiplayer,
+              onlineChallenges: chals
+           }
+       };
+
+       if (challengeCompleted) {
+           triggerCelebration('Challenge geschafft!', `+${pointsEarned} XP`);
+           return {
+              ...nextPrev,
+              points: nextPrev.points + pointsEarned,
+              history: [{
+                 id: Math.random().toString(36).substr(2, 9),
+                 type: 'challenge',
+                 value: 1,
+                 date: Date.now(),
+                 points: pointsEarned,
+                 comment: `Online Challenge absolviert: ${challengeTitle}`
+              }, ...nextPrev.history].slice(0, 100)
+           };
+       }
+
+       return nextPrev;
+    });
+
+    setIsChallengeProgressModalOpen(false);
+    setSelectedChallengeId(null);
+    setChallengeProgressInput(0);
   };
 
   const addGradeResult = (grade: Grade) => {
@@ -2741,6 +2980,128 @@ export default function App() {
             </motion.div>
           )}
 
+          {activeTab === 'online-challenges' && (
+            <motion.div 
+              key="online-challenges"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-6"
+            >
+              <div className="flex flex-col gap-2 relative z-10 block mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="bg-primary/20 p-2 rounded-xl text-primary drop-shadow-sm">
+                    <Globe className="w-6 h-6 sm:w-8 sm:h-8" />
+                  </div>
+                  <div className="flex flex-1 items-center justify-between">
+                    <h1 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 dark:text-white tracking-tight drop-shadow-sm">
+                      Online Challenges
+                    </h1>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between">
+                  <p className="text-slate-500 font-medium sm:text-lg">
+                    Miss dich mit anderen Schülern weltweit
+                  </p>
+                </div>
+              </div>
+
+              {profile.multiplayer?.onlineChallenges?.length ? (
+                <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                  {profile.multiplayer.onlineChallenges.map(chal => {
+                    const userParticipant = chal.participants.find(p => !p.isBot);
+                    const userScore = userParticipant?.score || 0;
+                    
+                    const displayParticipants = [...chal.participants].sort((a,b) => b.score - a.score);
+                    const userRank = displayParticipants.findIndex(p => !p.isBot) + 1;
+                    
+                    return (
+                      <div key={chal.id} className="card p-6 border-2 border-transparent hover:border-indigo-500/20 transition-all flex flex-col relative overflow-hidden">
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-indigo-500/10 to-transparent rounded-bl-full pointer-events-none" />
+                        <div className="flex justify-between items-start mb-4 relative z-10">
+                          <div>
+                            <h3 className="text-lg font-bold text-slate-900 dark:text-white leading-tight">{chal.title}</h3>
+                            <p className="text-xs font-bold text-slate-400 mt-1">Host: @{chal.host}</p>
+                          </div>
+                          <div className="bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 shrink-0">
+                            <Trophy className="w-3 h-3" />
+                            {chal.rewardPoints} XP
+                          </div>
+                        </div>
+                        <p className="text-sm text-slate-600 dark:text-slate-300 mb-6 flex-1 relative z-10">
+                          {chal.description}
+                        </p>
+                        
+                        <div className="space-y-3 bg-slate-50 dark:bg-slate-900/50 p-4 rounded-2xl relative z-10">
+                          <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center justify-between">
+                            <span>Live Ranking ({chal.target} Ziel)</span>
+                            <span className="flex items-center gap-1 text-green-500">
+                              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse mt-0.5" />
+                              Live
+                            </span>
+                          </h4>
+                          {displayParticipants.slice(0, 3).map((p, i) => (
+                            <div key={i} className={`flex items-center justify-between text-sm ${!p.isBot ? 'font-bold text-indigo-500' : 'text-slate-700 dark:text-slate-300'}`}>
+                              <span className="flex items-center gap-2">
+                                <span className="w-4 inline-block text-slate-400 text-xs font-bold">{i+1}.</span> 
+                                <span className={!p.isBot ? '' : 'truncate max-w-[100px]'}>{p.name}</span>
+                                {!p.isBot && <span className="text-[10px] bg-indigo-100 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-400 px-1.5 py-0.5 rounded ml-1">Du</span>}
+                              </span>
+                              <span className="font-bold font-mono text-xs">{p.score} <span className="text-[9px] text-slate-400">/ {chal.target}</span></span>
+                            </div>
+                          ))}
+                          {userParticipant && userRank > 3 && (
+                            <>
+                              <div className="text-center text-slate-300 dark:text-slate-600 text-xs py-1">⋮</div>
+                              <div className="flex items-center justify-between text-sm font-bold text-indigo-500 bg-indigo-50 dark:bg-indigo-500/10 -mx-2 px-2 py-1 rounded-lg">
+                                <span className="flex items-center gap-2">
+                                  <span className="w-4 inline-block text-indigo-400 text-xs">{userRank}.</span> 
+                                  <span>{profile.name || "Du"}</span>
+                                  <span className="text-[10px] bg-indigo-100 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-400 px-1.5 py-0.5 rounded ml-1">Du</span>
+                                </span>
+                                <span className="font-mono text-xs">{userParticipant.score} <span className="text-[9px] text-slate-400">/ {chal.target}</span></span>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                        
+                        <div className="mt-4 flex flex-col gap-2 relative z-10">
+                          {!userParticipant ? (
+                             <button
+                               onClick={() => handleJoinChallenge(chal.id)}
+                               className="w-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold py-3 rounded-xl transition-transform active:scale-95"
+                             >
+                               Teilnehmen
+                             </button>
+                          ) : (
+                             <button
+                               onClick={() => {
+                                  setSelectedChallengeId(chal.id);
+                                  setIsChallengeProgressModalOpen(true);
+                                  setChallengeProgressInput(0);
+                               }}
+                               className="w-full bg-indigo-500 text-white font-bold py-3 rounded-xl transition-transform active:scale-95 shadow-lg shadow-indigo-500/20"
+                             >
+                               Fortschritt eintragen
+                             </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="card p-12 text-center flex flex-col items-center justify-center">
+                  <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4">
+                    <Globe className="w-8 h-8 text-slate-400" />
+                  </div>
+                  <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Keine Challenges aktiv</h3>
+                  <p className="text-slate-500">Sobald die nächste Liga-Woche beginnt, findest du hier neue Host-Challenges von anderen Spielern.</p>
+                </div>
+              )}
+            </motion.div>
+          )}
+
           {activeTab === 'dev' && isDevMode && (
             <motion.div 
               key="dev"
@@ -2849,7 +3210,7 @@ export default function App() {
       {/* Modals */}
       <AnimatePresence>
         {isSidebarOpen && (
-          <div className="fixed inset-0 z-[60] flex">
+          <div key="modal-sidebar" className="fixed inset-0 z-[60] flex">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -2888,7 +3249,15 @@ export default function App() {
                   <button onClick={() => { setActiveTab('multiplayer'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-3 py-3 text-left rounded-xl transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50 group ${activeTab === 'multiplayer' ? 'text-primary' : 'text-slate-600 dark:text-slate-300'}`}>
                     <Users className="w-5 h-5" />
                     <div className="flex-1">
-                      <span className="font-bold flex items-center gap-2">Multiplayer</span>
+                      <span className="font-bold flex items-center gap-2">Multiplayer Ligen</span>
+                    </div>
+                    <ChevronRight className="w-4 h-4 opacity-50 group-hover:opacity-100 transition-opacity" />
+                  </button>
+
+                  <button onClick={() => { setActiveTab('online-challenges'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-3 py-3 text-left rounded-xl transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50 group ${activeTab === 'online-challenges' ? 'text-primary' : 'text-slate-600 dark:text-slate-300'}`}>
+                    <Globe className="w-5 h-5" />
+                    <div className="flex-1">
+                      <span className="font-bold flex items-center gap-2">Online Challenges</span>
                     </div>
                     <ChevronRight className="w-4 h-4 opacity-50 group-hover:opacity-100 transition-opacity" />
                   </button>
@@ -2899,7 +3268,7 @@ export default function App() {
         )}
 
         {isPartModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+          <div key="modal-part" className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -2991,7 +3360,7 @@ export default function App() {
 
         {/* Participation Confirm Modal */}
         {isParticipationConfirmOpen && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div key="modal-part-confirm" className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -3032,7 +3401,7 @@ export default function App() {
         )}
 
         {isGradeModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+          <div key="modal-grade" className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -3140,7 +3509,7 @@ export default function App() {
         )}
 
         {isSettingsOpen && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+          <div key="modal-settings" className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -3235,7 +3604,7 @@ export default function App() {
 
         {/* Developer Mode Password Modal */}
         {isDevPasswordModalOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+          <div key="modal-dev-pwd" className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -3283,7 +3652,7 @@ export default function App() {
         )}
 
         {isWeeklyRecapOpen && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div key="modal-weekly-recap" className="fixed inset-0 z-[60] flex items-center justify-center p-4">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -3347,7 +3716,7 @@ export default function App() {
         )}
 
         {isApkModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+          <div key="modal-apk" className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -3409,7 +3778,7 @@ export default function App() {
         )}
 
         {isAddGoalModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+          <div key="modal-add-goal" className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -3506,8 +3875,58 @@ export default function App() {
           </div>
         )}
 
+        {isChallengeProgressModalOpen && (
+          <div key="modal-challenge-progress" className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsChallengeProgressModalOpen(false)}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, y: 100, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 100, scale: 0.95 }}
+              className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 shadow-2xl dark:border dark:border-slate-800"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-display font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Globe className="text-indigo-500 w-6 h-6" />
+                  Fortschritt eintragen
+                </h2>
+                <button onClick={() => setIsChallengeProgressModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full cursor-pointer transition-colors">
+                  <X className="w-6 h-6 text-slate-400" />
+                </button>
+              </div>
+
+              <div className="space-y-4 mb-6">
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Wie viel hast du neu geschafft?</label>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Anzahl..."
+                    value={challengeProgressInput === 0 ? '' : challengeProgressInput}
+                    onChange={(e) => setChallengeProgressInput(Math.max(0, parseInt(e.target.value) || 0))}
+                    className="w-full bg-slate-100 dark:bg-slate-800 dark:text-white rounded-xl px-4 py-3 font-bold appearance-none outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <p className="text-xs text-slate-500 mt-2 font-medium">Trage hier z.B. 1 ein, wenn du dich einmal neu gemeldet hast, oder 30 für 30 Minuten üben.</p>
+                </div>
+              </div>
+              
+              <button 
+                onClick={handleSubmitChallengeProgress}
+                className="w-full bg-indigo-500 text-white font-bold py-4 rounded-2xl shadow-xl shadow-indigo-500/20 active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                Fortschritt speichern
+              </button>
+            </motion.div>
+          </div>
+        )}
+
         {isPracticeModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+          <div key="modal-practice" className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -3585,7 +4004,7 @@ export default function App() {
         )}
 
         {isTimerOpen && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+          <div key="modal-timer" className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -3733,7 +4152,7 @@ export default function App() {
         )}
 
         {isDiaryOpen && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+          <div key="modal-diary" className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -3798,7 +4217,7 @@ export default function App() {
         )}
 
         {isGradesOpen && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+          <div key="modal-grades" className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -4006,7 +4425,7 @@ export default function App() {
       {/* Celebration Overlay */}
       <AnimatePresence>
         {celebrationInfo && (
-          <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center pointer-events-none p-4">
+          <div key="modal-celebration" className="fixed inset-0 z-[100] flex flex-col items-center justify-center pointer-events-none p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.5, y: 50 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
