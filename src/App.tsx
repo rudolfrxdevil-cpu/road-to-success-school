@@ -43,7 +43,8 @@ import {
   Timer,
   Play,
   Pause,
-  RotateCcw
+  RotateCcw,
+  Dumbbell
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -54,7 +55,9 @@ import {
   Tooltip, 
   ResponsiveContainer,
   Cell,
-  ReferenceLine
+  ReferenceLine,
+  LineChart,
+  Line
 } from 'recharts';
 
 // --- Types ---
@@ -69,6 +72,8 @@ interface HistoryEntry {
   date: number;
   comment?: string;
   subject?: string;
+  focusNote?: string;
+  focusDuration?: number;
 }
 
 interface ScheduleSlot {
@@ -91,7 +96,24 @@ interface MultiplayerData {
      rank: number;
      leagueName: string;
   };
+  leagueHistory?: {
+    date: number;
+    rank: number;
+    points: number;
+    promoted: boolean;
+    relegated: boolean;
+    leagueName: string;
+  }[];
   bots: BotData[];
+}
+
+interface PersonalGoal {
+  id: string;
+  type: 'practice_minutes' | 'participations';
+  target: number;
+  period: 'daily' | 'weekly' | 'monthly';
+  createdAt: number;
+  lastClaimedAt?: number;
 }
 
 interface UserProfile {
@@ -103,9 +125,11 @@ interface UserProfile {
   history: HistoryEntry[];
   schedule: Record<number, ScheduleSlot[]>; // 0 = Mon, 1 = Tue, etc.
   diary?: { id: string; date: number; text: string }[];
+  lastRecapDate?: number;
   estimatedGrades?: Record<string, number>;
   unlockedAchievements?: string[];
   multiplayer?: MultiplayerData;
+  goals?: PersonalGoal[];
 }
 
 type Tab = 'dashboard' | 'schedule' | 'stats' | 'achievements' | 'multiplayer' | 'dev';
@@ -117,6 +141,42 @@ interface Achievement {
   icon: string;
   condition: (profile: UserProfile) => boolean;
 }
+
+const getPeriodStart = (period: 'daily' | 'weekly' | 'monthly') => {
+  const now = new Date();
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (period === 'daily') return d.getTime();
+  if (period === 'weekly') {
+    const day = d.getDay() || 7; 
+    return d.getTime() - (day - 1) * 24 * 60 * 60 * 1000;
+  }
+  if (period === 'monthly') {
+    return new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  }
+  return 0;
+};
+
+const getGoalReward = (goal: PersonalGoal) => {
+  if (goal.period === 'daily') return 25;
+  if (goal.period === 'weekly') return 100;
+  if (goal.period === 'monthly') return 300;
+  return 0;
+};
+
+const getGoalProgress = (goal: PersonalGoal, profile: UserProfile) => {
+  const periodStart = getPeriodStart(goal.period);
+  const relevantHistory = profile.history.filter(h => h.date >= periodStart);
+  
+  if (goal.type === 'participations') {
+    return relevantHistory.filter(h => h.type === 'participation').length;
+  }
+  if (goal.type === 'practice_minutes') {
+    return relevantHistory
+      .filter(h => h.type === 'challenge' && h.comment === 'Fokus-Session')
+      .reduce((acc, h) => acc + (h.focusDuration || (h.points / 2) || 25), 0); // fallback if missing
+  }
+  return 0;
+};
 
 const getAvailableSubjects = (profile: UserProfile): string[] => {
   const subjects = new Set<string>();
@@ -153,8 +213,37 @@ const getTrendGrade = (subject: string, baseGrade: number, history: HistoryEntry
     grade = grade - (diff * factor);
   }
   
-  // Participations improve it slightly (subtract 0.05 per participation)
-  grade = grade - (participations.length * 0.05);
+  // Participations consistency and time-decay logic
+  const now = Date.now();
+  const msPerDay = 24 * 60 * 60 * 1000;
+  
+  // Group by day to prevent spam in a single hour
+  const participationsByDay: Record<string, { count: number, date: number }> = {};
+  participations.forEach(p => {
+    const day = new Date(p.date).toDateString();
+    if (!participationsByDay[day]) {
+      participationsByDay[day] = { count: 0, date: p.date };
+    }
+    participationsByDay[day].count++;
+  });
+  
+  let validParticipationScore = 0;
+  
+  Object.values(participationsByDay).forEach(({ count, date }) => {
+    // Cap at 3 participations per day to reward consistency rather than burst
+    const effectiveCount = Math.min(count, 3);
+    
+    // Time decay: participations lose value over time (e.g. over 8 weeks = 56 days)
+    const daysOld = Math.max(0, (now - date) / msPerDay);
+    
+    // Weight goes from 1.0 (today) down to 0.0 (56+ days old)
+    const timeWeight = Math.max(0, 1 - (daysOld / 56));
+    
+    validParticipationScore += effectiveCount * timeWeight;
+  });
+  
+  // Each valid, recent participation improves the grade by 0.04
+  grade = grade - (validParticipationScore * 0.04);
   
   return Math.max(1, Math.min(6, grade)); // Grades from 1.0 to 6.0
 };
@@ -274,7 +363,7 @@ const ACHIEVEMENTS: Achievement[] = [
   { id: 'focus_night', title: 'Nachteule', description: 'Eine Fokus-Session nach 21 Uhr beendet.', icon: '🦉', condition: (p) => p.history.some(h => h.type === 'challenge' && h.comment === 'Fokus-Session' && new Date(h.date).getHours() >= 21) },
   { id: 'focus_morning', title: 'Frühaufsteher', description: 'Eine Fokus-Session vor 8 Uhr morgens beendet.', icon: '🌅', condition: (p) => p.history.some(h => h.type === 'challenge' && h.comment === 'Fokus-Session' && new Date(h.date).getHours() <= 8) },
 
-  // --- Multiplayer & Verschiedenes (6) ---
+  // --- Multiplayer & Verschiedenes ---
   { id: 'reached_bronze', title: 'Aufgeschlagen', description: 'Bronze Liga erreicht.', icon: '🥉', condition: (p) => !!p.multiplayer && p.multiplayer.leagueLevel >= 1 },
   { id: 'reached_silver', title: 'Glänzend', description: 'Silber Liga erreicht.', icon: '🥈', condition: (p) => !!p.multiplayer && p.multiplayer.leagueLevel >= 2 },
   { id: 'reached_gold', title: 'Goldschmied', description: 'Gold Liga erreicht.', icon: '🥇', condition: (p) => !!p.multiplayer && p.multiplayer.leagueLevel >= 3 },
@@ -282,6 +371,10 @@ const ACHIEVEMENTS: Achievement[] = [
   { id: 'reached_legend', title: 'Legende der Liga', description: 'Legenden Liga erreicht. Zeig ihnen wer der Boss ist!', icon: '👺', condition: (p) => !!p.multiplayer && p.multiplayer.leagueLevel >= 6 },
   { id: 'reached_god', title: 'Road to Success Gott', description: 'Du hast den Status eines Gottes erreicht.', icon: '⚡', condition: (p) => !!p.multiplayer && p.multiplayer.leagueLevel >= 12 },
   { id: 'reached_infinity', title: 'Die Unendlichkeit', description: 'Du hast die letzte bekannte Liga erreicht. Was kommt jetzt?', icon: '♾️', condition: (p) => !!p.multiplayer && p.multiplayer.leagueLevel >= 15 },
+  { id: 'multiplayer_first_place', title: 'Spitzenreiter', description: 'Als Erster aufgestiegen!', icon: '👑', condition: (p) => !!p.multiplayer?.leagueHistory?.some(h => h.promoted && h.rank === 1) },
+  { id: 'multiplayer_back_to_back', title: 'Durchmarsch', description: 'Zwei Wochen in Folge aufgestiegen.', icon: '🚀', condition: (p) => !!(p.multiplayer?.leagueHistory && p.multiplayer.leagueHistory.length >= 2 && p.multiplayer.leagueHistory[p.multiplayer.leagueHistory.length - 1].promoted && p.multiplayer.leagueHistory[p.multiplayer.leagueHistory.length - 2].promoted) },
+  { id: 'multiplayer_close_call', title: 'Zitterpartie', description: 'Klassenerhalt auf dem letzten sicheren Platz (Rang 7) geschafft.', icon: '😅', condition: (p) => !!p.multiplayer?.leagueHistory?.some(h => !h.promoted && !h.relegated && h.rank === 7) },
+  { id: 'multiplayer_podium', title: 'Treppchen', description: 'Liga auf dem Podium (Top 3) beendet.', icon: '🏗️', condition: (p) => !!p.multiplayer?.leagueHistory?.some(h => h.rank <= 3) },
   { id: 'weekend_warrior', title: 'Wochenend-Krieger', description: 'Aktivität am Samstag oder Sonntag.', icon: '⚔️', condition: (p) => p.history.some(h => {
     const day = new Date(h.date).getDay();
     return day === 0 || day === 6;
@@ -289,6 +382,109 @@ const ACHIEVEMENTS: Achievement[] = [
 ];
 
 // --- Constants ---
+
+const CHALLENGE_POOL = [
+  { id: 'p3', type: 'participation', target: 3, title: 'Beteilige dich 3x am Unterricht' },
+  { id: 'p5', type: 'participation', target: 5, title: 'Beteilige dich 5x am Unterricht' },
+  { id: 'p7', type: 'participation', target: 7, title: 'Beteilige dich 7x am Unterricht' },
+  { id: 'p8', type: 'participation', target: 8, title: 'Beteilige dich 8x am Unterricht' },
+  { id: 'p10', type: 'participation', target: 10, title: 'Beteilige dich 10x am Unterricht' },
+  { id: 'p12', type: 'participation', target: 12, title: 'Beteilige dich 12x am Unterricht' },
+  { id: 'p15', type: 'participation', target: 15, title: 'Beteilige dich 15x am Unterricht' },
+  { id: 'p18', type: 'participation', target: 18, title: 'Beteilige dich 18x am Unterricht' },
+  { id: 'p20', type: 'participation', target: 20, title: 'Beteilige dich 20x am Unterricht' },
+  { id: 'g1', type: 'grade', target: 1, title: 'Trage eine neue Note ein' },
+  { id: 'g2', type: 'grade', target: 2, title: 'Trage heute 2 Noten ein' },
+  { id: 'g1_best', type: 'grade_excellent', target: 1, title: 'Erreiche heute eine Eins' },
+  { id: 'g1_good', type: 'grade_good', target: 1, title: 'Erreiche heute eine Note 2 oder besser' },
+  { id: 'f1', type: 'focus', target: 1, title: 'Beende 1 Fokus-Session' },
+  { id: 'f2', type: 'focus', target: 2, title: 'Beende 2 Fokus-Sessions' },
+  { id: 'f3', type: 'focus', target: 3, title: 'Beende 3 Fokus-Sessions' },
+  { id: 'f4', type: 'focus', target: 4, title: 'Beende 4 Fokus-Sessions' },
+  { id: 'f5', type: 'focus', target: 5, title: 'Beende 5 Fokus-Sessions' },
+  { id: 'd1', type: 'diary', target: 1, title: 'Schreibe einen Tagebucheintrag' },
+  { id: 'pts50', type: 'points', target: 50, title: 'Sammle heute 50 Punkte' },
+  { id: 'pts75', type: 'points', target: 75, title: 'Sammle heute 75 Punkte' },
+  { id: 'pts100', type: 'points', target: 100, title: 'Sammle heute 100 Punkte' },
+  { id: 'pts125', type: 'points', target: 125, title: 'Sammle heute 125 Punkte' },
+  { id: 'pts150', type: 'points', target: 150, title: 'Sammle heute 150 Punkte' },
+  { id: 'pts200', type: 'points', target: 200, title: 'Sammle heute 200 Punkte' },
+  { id: 'pts250', type: 'points', target: 250, title: 'Sammle heute 250 Punkte' },
+  { id: 'pts300', type: 'points', target: 300, title: 'Sammle heute 300 Punkte' },
+  { id: 'm_math', type: 'subject_participation', subject: 'Mathematik', target: 3, title: 'Melde dich 3x in Mathe' },
+  { id: 'm_de', type: 'subject_participation', subject: 'Deutsch', target: 3, title: 'Melde dich 3x in Deutsch' },
+  { id: 'm_en', type: 'subject_participation', subject: 'Englisch', target: 3, title: 'Melde dich 3x in Englisch' },
+  { id: 'm_bio', type: 'subject_participation', subject: 'Biologie', target: 3, title: 'Melde dich 3x in Bio' },
+  { id: 'm_ph', type: 'subject_participation', subject: 'Physik', target: 3, title: 'Melde dich 3x in Physik' },
+  { id: 'm_ch', type: 'subject_participation', subject: 'Chemie', target: 3, title: 'Melde dich 3x in Chemie' },
+  { id: 'm_hi', type: 'subject_participation', subject: 'Geschichte', target: 3, title: 'Melde dich 3x in Geschichte' },
+  { id: 'm_ge', type: 'subject_participation', subject: 'Erdkunde', target: 3, title: 'Melde dich 3x in Erdkunde' },
+  { id: 'm_sp', type: 'subject_participation', subject: 'Sport', target: 3, title: 'Melde dich 3x in Sport' },
+  { id: 'm_ku', type: 'subject_participation', subject: 'Kunst', target: 3, title: 'Melde dich 3x in Kunst' },
+  { id: 'm_mu', type: 'subject_participation', subject: 'Musik', target: 3, title: 'Melde dich 3x in Musik' },
+  { id: 'm_re', type: 'subject_participation', subject: 'Religion', target: 3, title: 'Melde dich 3x in Religion' },
+  { id: 'multi_s2', type: 'multi_subject', target: 2, title: 'Beteilige dich in 2 verschiedenen Fächern' },
+  { id: 'multi_s3', type: 'multi_subject', target: 3, title: 'Beteilige dich in 3 verschiedenen Fächern' },
+  { id: 'multi_s4', type: 'multi_subject', target: 4, title: 'Beteilige dich in 4 verschiedenen Fächern' },
+  { id: 'type_test', type: 'grade_type', target: 'test', title: 'Trage einen Test ein' },
+  { id: 'type_vok', type: 'grade_type', target: 'vokabeltest', title: 'Trage einen Vokabeltest ein' },
+  { id: 'type_kl', type: 'grade_type', target: 'klausur', title: 'Trage eine Klausur ein' },
+  { id: 'f_late', type: 'focus_late', target: 1, title: 'Beende eine Fokus-Session nach 18 Uhr' },
+  { id: 'f_early', type: 'focus_early', target: 1, title: 'Beende eine Fokus-Session vor 9 Uhr' },
+  { id: 'p_streak_2', type: 'participation_streak', target: 2, title: 'Beteilige dich in 2 aufeinanderfolgenden Stunden' },
+  { id: 'p_5_math', type: 'subject_participation', subject: 'Mathematik', target: 5, title: 'Melde dich 5x in Mathematik' },
+  { id: 'p_5_de', type: 'subject_participation', subject: 'Deutsch', target: 5, title: 'Melde dich 5x in Deutsch' },
+  { id: 'p_5_en', type: 'subject_participation', subject: 'Englisch', target: 5, title: 'Melde dich 5x in Englisch' },
+  { id: 'g_math', type: 'subject_grade', subject: 'Mathematik', target: 1, title: 'Erhalte eine Note in Mathe' },
+  { id: 'g_de', type: 'subject_grade', subject: 'Deutsch', target: 1, title: 'Erhalte eine Note in Deutsch' },
+  { id: 'g_en', type: 'subject_grade', subject: 'Englisch', target: 1, title: 'Erhalte eine Note in Englisch' },
+  { id: 'f_long', type: 'focus_count', target: 3, title: 'Absolute 3 Fokus-Sessions' },
+  { id: 'p25', type: 'participation', target: 25, title: 'Beteilige dich 25x am Unterricht' },
+  { id: 'p30', type: 'participation', target: 30, title: 'Beteilige dich 30x am Unterricht' },
+  { id: 'p_double', type: 'double_participation', target: 2, title: 'Trage in einem Fach doppelte Meldungen ein' },
+  { id: 'pts400', type: 'points', target: 400, title: 'Sammle heute 400 Punkte' },
+  { id: 'pts500', type: 'points', target: 500, title: 'Sammle heute 500 Punkte' },
+  { id: 'pts1000', type: 'points', target: 1000, title: 'Sammle heute 1000 Punkte (Legendär!)' },
+  { id: 'g_no_bad', type: 'no_bad_grade', target: 1, title: 'Keine Note schlechter als 3 heute' },
+  { id: 'g_improve', type: 'grade_improve', target: 1, title: 'Verbessere dich in einer Note' },
+  { id: 'd_long', type: 'diary_long', target: 50, title: 'Schreibe ein Tagebucheintrag (min. 50 Zeichen)' },
+  { id: 'f_total_60', type: 'focus_minutes', target: 60, title: 'Insgesamt 60 Min Fokus heute' },
+  { id: 'f_total_120', type: 'focus_minutes', target: 120, title: 'Insgesamt 120 Min Fokus heute' },
+  { id: 'm_all_core', type: 'core_participation', target: 3, title: 'Melde dich in Mathe, Deutsch UND Englisch' },
+  { id: 'p_morning', type: 'participation_morning', target: 5, title: '5 Meldungen vor 11 Uhr' },
+  { id: 'p_afternoon', type: 'participation_afternoon', target: 5, title: '5 Meldungen nach 11 Uhr' },
+  { id: 'p_even', type: 'participation_even', target: 10, title: 'Erreiche eine gerade Anzahl an Meldungen' },
+  { id: 'p_odd', type: 'participation_odd', target: 11, title: 'Erreiche eine ungerade Anzahl an Meldungen' },
+  { id: 'grade_1_2', type: 'grade_range', target: [1, 2], title: 'Trage eine 1 oder 2 ein' },
+  { id: 'grade_2_3', type: 'grade_range', target: [2, 3], title: 'Trage eine 2 oder 3 ein' },
+  { id: 'focus_streak', type: 'focus_streak', target: 2, title: '2 Fokus-Sessions hintereinander' },
+  { id: 'diary_morning', type: 'diary_time', target: 'morning', title: 'Schreibe früh morgens ins Tagebuch' },
+  { id: 'diary_evening', type: 'diary_time', target: 'evening', title: 'Schreibe spät abends ins Tagebuch' },
+  { id: 'points_speed', type: 'points_speed', target: 100, title: 'Erhalte 100 Punkte innerhalb einer Stunde' },
+  { id: 'p_5_subject', type: 'any_subject_participation', target: 5, title: '5 Meldungen in einem beliebigen Fach' },
+  { id: 'p_10_subject', type: 'any_subject_participation', target: 10, title: '10 Meldungen in einem beliebigen Fach' },
+  { id: 'g_2_subjects', type: 'two_subject_grades', target: 2, title: 'Noten in 2 verschiedenen Fächern' },
+  { id: 'f_3_hours', type: 'focus_minutes', target: 180, title: 'Insgesamt 3 Stunden Fokus heute' },
+  { id: 'p_lunch', type: 'participation_lunch', target: 3, title: '3 Meldungen um die Mittagszeit' },
+  { id: 'p_const', type: 'participation_constant', target: 3, title: 'In den ersten 3 Stunden je 2 Meldungen' },
+  { id: 'g_top_3', type: 'grade_limit', target: 3, title: 'Nur Noten 1-3 heute' },
+  { id: 'pts_round', type: 'points_round', target: 100, title: 'Erreiche exakt eine Hundertermarke an Punkten' },
+  { id: 'm_science', type: 'science_participation', target: 5, title: '5 Meldungen in Naturwissenschaften' },
+  { id: 'm_languages', type: 'language_participation', target: 5, title: '5 Meldungen in Fremdsprachen' },
+  { id: 'f_break', type: 'focus_break', target: 1, title: 'Nutze eine volle Pause nach dem Fokus' },
+  { id: 'g_vok_1', type: 'grade_vok_1', target: 1, title: 'Eine 1 in einem Vokabeltest' },
+  { id: 'p_max', type: 'participation_max', target: 15, title: 'Erreiche dein Tagesziel an Meldungen' },
+  { id: 'pts_double', type: 'points_double', target: 2, title: 'Verdopple deine heutigen Punkte in einer Stunde' },
+  { id: 'f_no_skip', type: 'focus_no_skip', target: 2, title: '2 Fokus-Sessions ohne Abbruch' },
+  { id: 'g_lucky', type: 'grade_lucky', target: 1, title: 'Trage eine Note ein (Glückstag!)' },
+  { id: 'p_start', type: 'participation_start', target: 1, title: 'Erste Meldung direkt in der 1. Stunde' },
+  { id: 'p_end', type: 'participation_end', target: 1, title: 'Letzte Meldung in der letzten Stunde' },
+  { id: 'diary_pos', type: 'diary_positive', target: 1, title: 'Schreibe etwas Positives ins Tagebuch' },
+  { id: 'f_weekend', type: 'focus_weekend', target: 1, title: 'Wochenend-Fokus (Samstag/Sonntag)' },
+  { id: 'pts_777', type: 'points_lucky', target: 7, title: 'Sammle eine Zahl mit einer 7 drin' },
+  { id: 'g_final', type: 'grade_final', target: 1, title: 'Trage deine Abschlussnote ein' },
+  { id: 'p_100_total', type: 'participation_total', target: 100, title: 'Erreiche insgesamt 100 Meldungen (All-Time)' }
+];
 
 const DAYS = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag'];
 
@@ -545,6 +741,7 @@ function ProgressBar({ progress, color }: { progress: number; color: string }) {
 export default function App() {
   const [authUsername, setAuthUsername] = useState<string | null>(() => localStorage.getItem('auth_username'));
 
+  const [multiplayerViewMode, setMultiplayerViewMode] = useState<'standings' | 'stats'>('standings');
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isDark, setIsDark] = useState(() => {
@@ -618,6 +815,16 @@ export default function App() {
           const newData = initMultiplayerData(newLevel, currentWeekStart);
           newData.lastResults = { promoted, relegated, rank: userRank, leagueName };
           
+          const newHistoryEntry = {
+            date: currentWeekStart,
+            rank: userRank,
+            points: userWeeklyPts,
+            promoted,
+            relegated,
+            leagueName
+          };
+          newData.leagueHistory = [...(prev.multiplayer.leagueHistory || []), newHistoryEntry].slice(-10);
+          
           return { ...prev, multiplayer: newData };
         }
         
@@ -625,6 +832,21 @@ export default function App() {
       });
     }
   }, [authUsername, profile.name]);
+
+  // Check for Weekly Recap on Sunday
+  useEffect(() => {
+    if (authUsername && profile.name) {
+      const now = new Date();
+      const isSunday = now.getDay() === 0;
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const lastRecap = profile.lastRecapDate || 0;
+
+      if (isSunday && lastRecap < todayStart) {
+        setIsWeeklyRecapOpen(true);
+        setProfile(prev => ({ ...prev, lastRecapDate: todayStart }));
+      }
+    }
+  }, [authUsername, profile.name, profile.lastRecapDate]);
 
   // Check and update streak
   useEffect(() => {
@@ -694,7 +916,16 @@ export default function App() {
   const [pendingParticipationData, setPendingParticipationData] = useState<{mode: 'total' | 'subjects', total?: number, subjects?: Record<string, number>} | null>(null);
   const [gradeType, setGradeType] = useState<'vokabeltest' | 'test' | 'arbeit'>('arbeit');
   const [isPartModalOpen, setIsPartModalOpen] = useState(false);
+  const [isPracticeModalOpen, setIsPracticeModalOpen] = useState(false);
+  const [practiceDuration, setPracticeDuration] = useState(25);
+  const [practiceSubject, setPracticeSubject] = useState("");
+  const [practiceNote, setPracticeNote] = useState("");
+  const [isAddGoalModalOpen, setIsAddGoalModalOpen] = useState(false);
+  const [newGoalType, setNewGoalType] = useState<'practice_minutes' | 'participations'>('participations');
+  const [newGoalTarget, setNewGoalTarget] = useState(5);
+  const [newGoalPeriod, setNewGoalPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isWeeklyRecapOpen, setIsWeeklyRecapOpen] = useState(false);
   const [isDevMode, setIsDevMode] = useState(false);
   const [devResetClicks, setDevResetClicks] = useState(0);
   const [isDevPasswordModalOpen, setIsDevPasswordModalOpen] = useState(false);
@@ -725,6 +956,9 @@ export default function App() {
   // Timer State
   const [isTimerOpen, setIsTimerOpen] = useState(false);
   const [timerMode, setTimerMode] = useState<'focus' | 'break'>('focus');
+  const [timerDuration, setTimerDuration] = useState(25);
+  const [timerSubject, setTimerSubject] = useState("");
+  const [timerNote, setTimerNote] = useState("");
   const [timeLeft, setTimeLeft] = useState(25 * 60);
   const [isTimerActive, setIsTimerActive] = useState(false);
 
@@ -737,17 +971,22 @@ export default function App() {
     } else if (isTimerActive && timeLeft === 0) {
       setIsTimerActive(false);
       if (timerMode === 'focus') {
-        triggerCelebration('Fokus-Session beendet!', '+50 Punkte');
+        // Calculate points based on duration
+        const pointsEarned = timerDuration * 2; // 2 points per minute
+        triggerCelebration('Fokus-Session beendet!', `+${pointsEarned} Punkte`);
         setProfile(prev => ({
           ...prev,
-          points: prev.points + 50,
+          points: prev.points + pointsEarned,
           history: [...prev.history, {
             id: Math.random().toString(36).substr(2, 9),
             type: 'challenge',
             value: 1,
-            points: 50,
+            points: pointsEarned,
             date: Date.now(),
-            comment: 'Fokus-Session'
+            comment: 'Fokus-Session',
+            subject: timerSubject,
+            focusNote: timerNote,
+            focusDuration: timerDuration
           }]
         }));
         setTimerMode('break');
@@ -755,13 +994,13 @@ export default function App() {
       } else {
         triggerCelebration('Pause beendet!', 'Bereit für die nächste Session?');
         setTimerMode('focus');
-        setTimeLeft(25 * 60);
+        setTimeLeft(timerDuration * 60);
       }
     }
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isTimerActive, timeLeft, timerMode]);
+  }, [isTimerActive, timeLeft, timerMode, timerDuration, timerSubject, timerNote]);
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -905,6 +1144,21 @@ export default function App() {
   }, [profile.history]);
 
   // Multiplayer Standings
+  const weeklyStats = useMemo(() => {
+    const now = new Date();
+    const monday = getMonday(now.getTime());
+    const weekHistory = profile.history.filter(h => h.date >= monday);
+
+    const pts = weekHistory.reduce((acc, h) => acc + (h.points || 0), 0);
+    const parts = weekHistory.filter(h => h.type === 'participation').length;
+    const grades = weekHistory.filter(h => h.type === 'grade');
+    const avg = grades.length > 0 ? (grades.reduce((acc, g) => acc + Number(g.value), 0) / grades.length).toFixed(1) : null;
+    const best = grades.length > 0 ? Math.min(...grades.map(g => Number(g.value))) : null;
+    const days = new Set(weekHistory.map(h => new Date(h.date).toDateString())).size;
+
+    return { points: pts, participations: parts, avgGrade: avg, bestGrade: best, activeDays: days };
+  }, [profile.history]);
+
   const multiplayerStandings = useMemo(() => {
     if (!profile.multiplayer) return [];
     const now = new Date();
@@ -983,24 +1237,172 @@ export default function App() {
     });
   }, [profile, bestSubjectsSort]);
 
+  const focusStats = useMemo(() => {
+    const focusSessions = profile.history.filter(h => h.type === 'challenge' && h.comment === 'Fokus-Session');
+    
+    const subjectMins: Record<string, number> = {};
+    const subjectCounts: Record<string, number> = {};
+    const notes: Array<{ date: number, subject: string, note: string, duration: number }> = [];
+    
+    let totalMinutes = 0;
+    
+    focusSessions.forEach(f => {
+      const minutes = f.focusDuration || 25;
+      totalMinutes += minutes;
+      
+      const subj = f.subject || 'Ohne Fach';
+      subjectMins[subj] = (subjectMins[subj] || 0) + minutes;
+      subjectCounts[subj] = (subjectCounts[subj] || 0) + 1;
+      
+      if (f.focusNote) {
+        notes.push({
+          date: f.date,
+          subject: subj,
+          note: f.focusNote,
+          duration: minutes
+        });
+      }
+    });
+
+    notes.sort((a, b) => b.date - a.date);
+    
+    const bySubject = Object.keys(subjectMins).map(subj => ({
+      subject: subj,
+      minutes: subjectMins[subj],
+      count: subjectCounts[subj]
+    })).sort((a, b) => b.minutes - a.minutes);
+    
+    return {
+      totalMinutes,
+      totalSessions: focusSessions.length,
+      bySubject,
+      notes
+    };
+  }, [profile.history]);
+
   // Daily Challenges Logic
   const dailyChallenges = useMemo(() => {
     const todayStr = new Date().toDateString();
+    
+    // Simple hash for stable daily selection
+    let hash = 0;
+    for (let i = 0; i < todayStr.length; i++) {
+        hash = ((hash << 5) - hash) + todayStr.charCodeAt(i);
+        hash |= 0;
+    }
+    const index = Math.abs(hash) % CHALLENGE_POOL.length;
+    const challengeTemplate = CHALLENGE_POOL[index];
+
     const todayHistory = profile.history.filter(h => new Date(h.date).toDateString() === todayStr);
-    const partCount = todayHistory.filter(h => h.type === 'participation').length;
-    const gradeCount = todayHistory.filter(h => h.type === 'grade').length;
+    
+    let current = 0;
+    const type = challengeTemplate.type;
+    const target = challengeTemplate.target;
 
-    const targets = [
-      { id: 'p5', type: 'participation', target: 5, points: 50, title: '5x gemeldet', current: partCount },
-      { id: 'p10', type: 'participation', target: 10, points: 100, title: '10x gemeldet', current: partCount },
-      { id: 'g1', type: 'grade', target: 1, points: 50, title: 'Note eintragen', current: gradeCount }
-    ];
+    switch(type) {
+      case 'participation':
+        current = todayHistory.filter(h => h.type === 'participation').length;
+        break;
+      case 'grade':
+        current = todayHistory.filter(h => h.type === 'grade').length;
+        break;
+      case 'grade_excellent':
+        current = todayHistory.some(h => h.type === 'grade' && h.value === 1) ? 1 : 0;
+        break;
+      case 'grade_good':
+        current = todayHistory.some(h => h.type === 'grade' && Number(h.value) <= 2) ? 1 : 0;
+        break;
+      case 'focus':
+      case 'focus_count':
+        current = todayHistory.filter(h => h.type === 'challenge' && h.comment === 'Fokus-Session').length;
+        break;
+      case 'diary':
+      case 'diary_long':
+        const todayDiary = (profile.diary || []).filter(d => new Date(d.date).toDateString() === todayStr);
+        if (type === 'diary_long') {
+          current = todayDiary.some(d => d.text.length >= (target as number)) ? 1 : 0;
+        } else {
+          current = todayDiary.length;
+        }
+        break;
+      case 'points':
+        current = todayHistory.reduce((sum, h) => sum + (h.points || 0), 0);
+        break;
+      case 'subject_participation':
+        current = todayHistory.filter(h => h.type === 'participation' && h.subject === (challengeTemplate as any).subject).length;
+        break;
+      case 'multi_subject':
+        current = new Set(todayHistory.filter(h => h.type === 'participation' && h.subject).map(h => h.subject)).size;
+        break;
+      case 'grade_type':
+        current = todayHistory.some(h => h.type === 'grade' && h.comment === target) ? 1 : 0;
+        break;
+      case 'focus_late':
+        current = todayHistory.some(h => h.type === 'challenge' && h.comment === 'Fokus-Session' && new Date(h.date).getHours() >= 18) ? 1 : 0;
+        break;
+      case 'focus_early':
+        current = todayHistory.some(h => h.type === 'challenge' && h.comment === 'Fokus-Session' && new Date(h.date).getHours() < 9) ? 1 : 0;
+        break;
+      case 'focus_minutes':
+        current = todayHistory.filter(h => h.type === 'challenge' && h.comment === 'Fokus-Session').length * 25;
+        break;
+      case 'subject_grade':
+        current = todayHistory.some(h => h.type === 'grade' && h.subject === (challengeTemplate as any).subject) ? 1 : 0;
+        break;
+      case 'any_subject_participation':
+        const subjCounts: Record<string, number> = {};
+        todayHistory.filter(h => h.type === 'participation' && h.subject).forEach(h => {
+          subjCounts[h.subject!] = (subjCounts[h.subject!] || 0) + 1;
+        });
+        current = Object.keys(subjCounts).length > 0 ? Math.max(...Object.values(subjCounts)) : 0;
+        break;
+      case 'grade_range':
+        current = todayHistory.some(h => h.type === 'grade' && (target as number[]).includes(h.value as any)) ? 1 : 0;
+        break;
+      case 'participation_morning':
+        current = todayHistory.filter(h => h.type === 'participation' && new Date(h.date).getHours() < 11).length;
+        break;
+      case 'participation_afternoon':
+        current = todayHistory.filter(h => h.type === 'participation' && new Date(h.date).getHours() >= 11).length;
+        break;
+      case 'science_participation':
+        const science = ['Biologie', 'Physik', 'Chemie', 'Naturwissenschaften'];
+        current = todayHistory.filter(h => h.type === 'participation' && science.includes(h.subject || '')).length;
+        break;
+      case 'language_participation':
+        const langs = ['Englisch', 'Französisch', 'Spanisch', 'Latein', 'Deutsch'];
+        current = todayHistory.filter(h => h.type === 'participation' && langs.includes(h.subject || '')).length;
+        break;
+      case 'no_bad_grade':
+        const todayGrades = todayHistory.filter(h => h.type === 'grade');
+        current = (todayGrades.length > 0 && todayGrades.every(h => Number(h.value) <= 3)) ? 1 : 0;
+        break;
+      case 'grade_limit':
+        const grds = todayHistory.filter(h => h.type === 'grade');
+        current = (grds.length > 0 && grds.every(h => Number(h.value) <= (target as number))) ? 1 : 0;
+        break;
+      case 'core_participation':
+        const core = ['Mathematik', 'Deutsch', 'Englisch'];
+        const coreMet = core.every(s => todayHistory.some(h => h.type === 'participation' && h.subject === s));
+        current = coreMet ? 1 : 0;
+        break;
+      case 'participation_total':
+        current = profile.history.filter(h => h.type === 'participation').length;
+        break;
+      default:
+        current = todayHistory.filter(h => h.type === 'participation').length;
+    }
 
-    return targets.map(t => {
-      const completed = todayHistory.some(h => h.type === 'challenge' && h.comment === t.id);
-      return { ...t, current: Math.min(t.current, t.target), completed };
-    });
-  }, [profile.history]);
+    const completed = todayHistory.some(h => h.type === 'challenge' && h.comment === challengeTemplate.id);
+    
+    // Return an array with exactly one challenge (UI expects array)
+    return [{
+       ...challengeTemplate,
+       current: Math.min(typeof current === 'number' ? current : 0, typeof target === 'number' ? target : 1),
+       completed,
+       points: 50
+    }];
+  }, [profile]);
 
   useEffect(() => {
     let awarded = false;
@@ -1008,14 +1410,15 @@ export default function App() {
     let earnedPoints = 0;
 
     dailyChallenges.forEach(c => {
-      if (c.current >= c.target && !c.completed) {
+      const isTargetMet = typeof c.target === 'number' ? c.current >= (c.target as number) : c.current >= 1;
+      if (isTargetMet && !c.completed) {
         awarded = true;
-        earnedPoints += c.points;
+        earnedPoints += 50; // Always 50 as requested
         newEntries.push({
            id: Math.random().toString(36).substr(2, 9),
            type: 'challenge',
-           value: c.target,
-           points: c.points,
+           value: typeof c.target === 'number' ? c.target : 1,
+           points: 50,
            date: Date.now(),
            comment: c.id
         });
@@ -1206,6 +1609,79 @@ export default function App() {
     setIsPartModalOpen(false);
     setIsParticipationConfirmOpen(false);
     setPendingParticipationData(null);
+  };
+
+  const submitPractice = () => {
+    if (practiceDuration <= 0) return;
+    
+    // Calculate points based on duration like study timer
+    const pointsEarned = practiceDuration * 2; // 2 points per minute
+    
+    setProfile(prev => ({
+      ...prev,
+      points: prev.points + pointsEarned,
+      history: [{
+        id: Math.random().toString(36).substr(2, 9),
+        type: 'challenge',
+        value: 1,
+        points: pointsEarned,
+        date: Date.now(),
+        comment: 'Fokus-Session',
+        subject: practiceSubject,
+        focusNote: practiceNote,
+        focusDuration: practiceDuration
+      }, ...prev.history].slice(0, 100)
+    }));
+    
+    triggerCelebration('Geübt!', `+${pointsEarned} Punkte für ${practiceDuration} Min Fokus`);
+    
+    setIsPracticeModalOpen(false);
+    setPracticeDuration(25);
+    setPracticeSubject("");
+    setPracticeNote("");
+  };
+
+  const handleAddGoal = () => {
+    const newGoal: PersonalGoal = {
+      id: Math.random().toString(36).substr(2, 9),
+      type: newGoalType,
+      target: newGoalTarget,
+      period: newGoalPeriod,
+      createdAt: Date.now()
+    };
+    setProfile(prev => ({ ...prev, goals: [...(prev.goals || []), newGoal] }));
+    setIsAddGoalModalOpen(false);
+  };
+
+  const claimGoal = (goal: PersonalGoal) => {
+    const periodStart = getPeriodStart(goal.period);
+    if (goal.lastClaimedAt && goal.lastClaimedAt >= periodStart) return; // already claimed for this period
+
+    const points = getGoalReward(goal);
+    setProfile(prev => {
+      const now = Date.now();
+      const goals = (prev.goals || []).map(g => g.id === goal.id ? { ...g, lastClaimedAt: now } : g);
+      return {
+        ...prev,
+        goals,
+        points: prev.points + points,
+        history: [{
+          id: Math.random().toString(36).substr(2, 9),
+          type: 'challenge',
+          value: 1,
+          date: now,
+          points,
+          comment: 'Ziel erreicht!'
+        }, ...prev.history].slice(0, 100)
+      };
+    });
+    triggerCelebration('Ziel erreicht!', `+${points} Punkte`);
+  };
+
+  const removeGoal = (id: string) => {
+    if (confirm('Möchtest du dieses Ziel wirklich löschen?')) {
+      setProfile(prev => ({ ...prev, goals: (prev.goals || []).filter(g => g.id !== id) }));
+    }
   };
 
   const addGradeResult = (grade: Grade) => {
@@ -1443,31 +1919,43 @@ export default function App() {
 
               {/* Action Buttons */}
               <section className="space-y-4" id="actions">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-3 gap-3">
                   <motion.button 
                     whileTap={{ scale: 0.95 }}
                     onClick={openPartModal}
-                    className="flex flex-col items-center justify-center p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all duration-300 group cursor-pointer"
+                    className="flex flex-col items-center justify-center p-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all duration-300 group cursor-pointer"
                     id="participation-btn"
                   >
-                    <div className="w-16 h-16 bg-blue-50 dark:bg-blue-500/10 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                      <Hand className="text-blue-500 w-8 h-8" />
+                    <div className="w-12 h-12 bg-blue-50 dark:bg-blue-500/10 rounded-2xl flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                      <Hand className="text-blue-500 w-6 h-6" />
                     </div>
-                    <span className="font-display font-bold text-slate-900 dark:text-white transition-colors">Gemeldet</span>
-                    <span className="text-xs text-blue-500 font-bold mt-1">+{PARTICIPATION_POINTS} Punkte</span>
+                    <span className="font-display font-bold text-sm text-center text-slate-900 dark:text-white transition-colors">Gemeldet</span>
+                    <span className="text-[10px] text-blue-500 font-bold mt-1">+{PARTICIPATION_POINTS} Pkt</span>
+                  </motion.button>
+
+                  <motion.button 
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => setIsPracticeModalOpen(true)}
+                    className="flex flex-col items-center justify-center p-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all duration-300 group cursor-pointer"
+                  >
+                    <div className="w-12 h-12 bg-indigo-50 dark:bg-indigo-500/10 rounded-2xl flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                      <Dumbbell className="text-indigo-500 w-6 h-6" />
+                    </div>
+                    <span className="font-display font-bold text-sm text-center text-slate-900 dark:text-white transition-colors">Geübt</span>
+                    <span className="text-[10px] text-indigo-500 font-bold mt-1">Bonuspunkte</span>
                   </motion.button>
 
                   <motion.button 
                     whileTap={{ scale: 0.95 }}
                     onClick={openGradeModal}
-                    className="flex flex-col items-center justify-center p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all duration-300 group cursor-pointer"
+                    className="flex flex-col items-center justify-center p-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all duration-300 group cursor-pointer"
                     id="grade-btn"
                   >
-                    <div className="w-16 h-16 bg-green-50 dark:bg-green-500/10 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                      <GraduationCap className="text-green-500 w-8 h-8" />
+                    <div className="w-12 h-12 bg-green-50 dark:bg-green-500/10 rounded-2xl flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                      <GraduationCap className="text-green-500 w-6 h-6" />
                     </div>
-                    <span className="font-display font-bold text-slate-900 dark:text-white transition-colors">Arbeit/Test</span>
-                    <span className="text-xs text-green-500 font-bold mt-1">Bonuspunkte</span>
+                    <span className="font-display font-bold text-sm text-center text-slate-900 dark:text-white transition-colors">Note</span>
+                    <span className="text-[10px] text-green-500 font-bold mt-1">Bonuspunkte</span>
                   </motion.button>
                 </div>
                 
@@ -1523,12 +2011,12 @@ export default function App() {
                 </motion.button>
               </section>
 
-              {/* Daily Challenges */}
+              {/* Daily Challenge */}
               <section className="space-y-4">
                 <div className="flex items-center justify-between px-2">
                   <h3 className="font-display font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
                     <Target className="w-4 h-4 text-slate-400" />
-                    Daily Challenges
+                    Daily Challenge
                   </h3>
                 </div>
                 <div className="space-y-3">
@@ -1554,6 +2042,91 @@ export default function App() {
                        </div>
                     </div>
                   ))}
+                </div>
+              </section>
+
+              {/* Meine Ziele */}
+              <section className="space-y-4">
+                <div className="flex items-center justify-between px-2">
+                  <h3 className="font-display font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                    <Target className="w-4 h-4 text-slate-400" />
+                    Meine Ziele
+                  </h3>
+                  <button 
+                    onClick={() => setIsAddGoalModalOpen(true)}
+                    className="text-xs font-bold text-indigo-500 bg-indigo-50 dark:bg-indigo-500/10 px-3 py-1.5 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-500/20 transition-colors"
+                  >
+                    + Ziel hinzufügen
+                  </button>
+                </div>
+                
+                <div className="space-y-3">
+                  {(!profile.goals || profile.goals.length === 0) ? (
+                    <div className="text-center py-6 px-4 border border-dashed border-slate-200 dark:border-slate-800 rounded-3xl bg-slate-50 dark:bg-slate-900/50">
+                      <p className="text-slate-400 text-xs font-bold">Keine aktiven Ziele vorhanden.</p>
+                      <button onClick={() => setIsAddGoalModalOpen(true)} className="mt-2 text-xs font-bold text-indigo-500 hover:underline">Jetzt Ziel erstellen</button>
+                    </div>
+                  ) : (
+                    profile.goals.map((goal) => {
+                      const progress = getGoalProgress(goal, profile);
+                      const isTargetMet = progress >= goal.target;
+                      const periodStart = getPeriodStart(goal.period);
+                      const isClaimed = goal.lastClaimedAt ? goal.lastClaimedAt >= periodStart : false;
+                      const title = goal.type === 'practice_minutes' ? `Üben (${goal.target} Min)` : `Melden (${goal.target} mal)`;
+                      const icon = goal.type === 'practice_minutes' ? <Timer className="w-6 h-6" /> : <Hand className="w-6 h-6" />;
+                      const reward = getGoalReward(goal);
+                      
+                      return (
+                        <div key={goal.id} className="card py-4 px-5 flex items-center gap-4">
+                          <button 
+                            onClick={() => removeGoal(goal.id)}
+                            className="absolute -top-2 -right-2 w-6 h-6 bg-slate-200 dark:bg-slate-700 hover:bg-red-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 transition-colors z-10"
+                            title="Ziel löschen"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                          
+                          <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${isClaimed ? 'bg-indigo-500/10 text-indigo-500' : 'bg-slate-50 dark:bg-slate-800 text-slate-400'}`}>
+                            {isClaimed ? <Award className="w-6 h-6" /> : icon}
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex justify-between items-center mb-1">
+                              <p className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                                {title}
+                                <span className="text-[9px] uppercase tracking-widest font-black text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded flex-shrink-0">
+                                  {goal.period === 'daily' ? 'Tag' : goal.period === 'weekly' ? 'Woche' : 'Monat'}
+                                </span>
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <div className="flex-1 h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden flex">
+                                <div 
+                                  className={`h-full transition-all duration-500 ${isClaimed ? 'bg-indigo-500' : isTargetMet ? 'bg-green-500' : 'bg-slate-300 dark:bg-slate-600'}`} 
+                                  style={{ width: `${Math.min((progress / goal.target) * 100, 100)}%` }} 
+                                />
+                              </div>
+                              <span className="text-[10px] font-bold text-slate-400 w-12 text-right">{progress} / {goal.target}</span>
+                            </div>
+                            
+                            <div className="mt-2 flex justify-between items-center">
+                              <span className="text-xs font-bold text-indigo-500">+{reward} XP</span>
+                              {isTargetMet && !isClaimed && (
+                                <button
+                                  onClick={() => claimGoal(goal)}
+                                  className="text-[10px] font-bold bg-indigo-500 text-white px-3 py-1 rounded-lg hover:bg-indigo-600 transition-colors shadow-md shadow-indigo-500/20"
+                                >
+                                  Einlösen!
+                                </button>
+                              )}
+                              {isClaimed && (
+                                <span className="text-[10px] font-bold text-green-500">Erledigt für diese Periode</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
               </section>
 
@@ -1862,6 +2435,64 @@ export default function App() {
                 </div>
               </section>
 
+              {/* Focus Stats */}
+              <section className="card p-4 space-y-4">
+                <div className="flex flex-col space-y-3">
+                  <div>
+                    <h3 className="font-display font-bold text-slate-800 dark:text-slate-200 mb-1">Fokus & Timer</h3>
+                    <p className="text-xs text-slate-400 font-bold uppercase tracking-widest italic">Deine Lern-Zeiten im Überblick</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 my-4">
+                  <div className="p-4 rounded-2xl bg-indigo-50 dark:bg-indigo-900/20 text-center">
+                    <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest font-black">Insgesamt</p>
+                    <p className="text-2xl font-display font-black text-indigo-600 dark:text-indigo-400">
+                       {Math.floor(focusStats.totalMinutes / 60)}h {focusStats.totalMinutes % 60}m
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-2xl bg-indigo-50 dark:bg-indigo-900/20 text-center">
+                    <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest font-black">Sessions</p>
+                    <p className="text-2xl font-display font-black text-indigo-600 dark:text-indigo-400">
+                       {focusStats.totalSessions}
+                    </p>
+                  </div>
+                </div>
+
+                {focusStats.bySubject.length > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-4 mb-2">Nach Fach</h4>
+                    {focusStats.bySubject.filter(s => s.minutes > 0).slice(0, 5).map((subj, idx) => (
+                      <div key={subj.subject} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
+                        <div>
+                          <p className="font-bold text-slate-900 dark:text-white text-sm">{subj.subject}</p>
+                          <p className="text-[10px] font-bold text-slate-400">{subj.count} Sessions</p>
+                        </div>
+                        <p className="font-display font-bold text-sm text-indigo-500">
+                          {Math.floor(subj.minutes / 60) > 0 && `${Math.floor(subj.minutes / 60)}h `}{subj.minutes % 60}m
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {focusStats.notes.length > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-4 mb-2">Letzte Einträge</h4>
+                    {focusStats.notes.slice(0, 3).map((note, idx) => (
+                      <div key={idx} className="p-3 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[10px] font-black uppercase text-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded-md">{note.subject}</span>
+                          <span className="text-[10px] font-bold text-slate-400">{new Date(note.date).toLocaleDateString()}</span>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-700 dark:text-slate-300 italic">"{note.note}"</p>
+                        <p className="text-[10px] font-bold text-slate-400 text-right mt-1">{note.duration} Min</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
               <div className="card p-8 flex flex-col items-center justify-center text-center space-y-4">
                 <div className="w-16 h-16 bg-yellow-50 dark:bg-yellow-500/10 rounded-full flex items-center justify-center">
                   <Award className="w-8 h-8 text-yellow-500" />
@@ -1964,37 +2595,149 @@ export default function App() {
                 )}
               </div>
               
-              <div className="space-y-3">
-                <div className="px-4 flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                   <span className="flex-1">Platzierung</span>
-                   <span className="flex-none">Wochenpunkte</span>
-                </div>
-                {multiplayerStandings.map((player, index) => (
-                  <div key={`${player.name}-${index}`} className={`flex items-center justify-between p-4 rounded-2xl border-2 transition-all duration-300 relative overflow-hidden hover:shadow-md hover:-translate-y-0.5 ${
-                     player.isUser ? 'bg-primary/10 border-primary/30 shadow-md' : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800'
-                  }`}>
-                    {index < 3 && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-green-500 rounded-l-2xl"></div>}
-                    {index > 6 && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-red-500 rounded-l-2xl"></div>}
-                    
-                    <div className="flex items-center gap-4 pl-2">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${
-                        index === 0 ? 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 ring-2 ring-yellow-400/50' :
-                        index === 1 ? 'bg-slate-200 text-slate-600 dark:bg-slate-700 ring-2 ring-slate-400/50' :
-                        index === 2 ? 'bg-orange-100 text-orange-600 dark:bg-orange-900/30 ring-2 ring-orange-400/50' :
-                        'bg-slate-50 dark:bg-slate-800 text-slate-400'
-                      }`}>
-                         {index + 1}
+              <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl">
+                <button
+                  onClick={() => setMultiplayerViewMode('standings')}
+                  className={`flex-1 py-2 text-sm font-bold rounded-xl transition-all ${multiplayerViewMode === 'standings' ? 'bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                >
+                  Aktuell
+                </button>
+                <button
+                  onClick={() => setMultiplayerViewMode('stats')}
+                  className={`flex-1 py-2 text-sm font-bold rounded-xl transition-all ${multiplayerViewMode === 'stats' ? 'bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                >
+                  Statistiken
+                </button>
+              </div>
+              
+              {multiplayerViewMode === 'standings' ? (
+                <div className="space-y-3">
+                  <div className="px-4 flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                     <span className="flex-1">Platzierung</span>
+                     <span className="flex-none">Wochenpunkte</span>
+                  </div>
+                  {multiplayerStandings.map((player, index) => (
+                    <div key={`${player.name}-${index}`} className={`flex items-center justify-between p-4 rounded-2xl border-2 transition-all duration-300 relative overflow-hidden hover:shadow-md hover:-translate-y-0.5 ${
+                       player.isUser ? 'bg-primary/10 border-primary/30 shadow-md' : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800'
+                    }`}>
+                      {index < 3 && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-green-500 rounded-l-2xl"></div>}
+                      {index > 6 && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-red-500 rounded-l-2xl"></div>}
+                      
+                      <div className="flex items-center gap-4 pl-2">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${
+                          index === 0 ? 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 ring-2 ring-yellow-400/50' :
+                          index === 1 ? 'bg-slate-200 text-slate-600 dark:bg-slate-700 ring-2 ring-slate-400/50' :
+                          index === 2 ? 'bg-orange-100 text-orange-600 dark:bg-orange-900/30 ring-2 ring-orange-400/50' :
+                          'bg-slate-50 dark:bg-slate-800 text-slate-400'
+                        }`}>
+                           {index + 1}
+                        </div>
+                        <span className={`font-bold text-sm ${player.isUser ? 'text-primary' : 'text-slate-700 dark:text-slate-200'}`}>
+                           {player.name} {player.isUser ? ' (Du)' : ''}
+                        </span>
                       </div>
-                      <span className={`font-bold text-sm ${player.isUser ? 'text-primary' : 'text-slate-700 dark:text-slate-200'}`}>
-                         {player.name} {player.isUser ? ' (Du)' : ''}
+                      <span className="font-display font-bold text-xl text-slate-900 dark:text-white tracking-tight">
+                        {player.points.toLocaleString()}
                       </span>
                     </div>
-                    <span className="font-display font-bold text-xl text-slate-900 dark:text-white tracking-tight">
-                      {player.points.toLocaleString()}
-                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  <div className="card p-6 space-y-6">
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                        <TrendingUp className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-slate-900 dark:text-white">Historische Ränge</h3>
+                        <p className="text-xs text-slate-500">Dein Abschlussrang der letzten Wochen</p>
+                      </div>
+                    </div>
+                    {(!profile.multiplayer?.leagueHistory || profile.multiplayer.leagueHistory.length === 0) ? (
+                      <div className="py-12 text-center flex flex-col items-center opacity-50">
+                        <BarChart3 className="w-12 h-12 mb-3 text-slate-400" />
+                        <p className="text-sm font-bold text-slate-500">Noch keine Daten vorhanden</p>
+                        <p className="text-xs text-slate-400">Beende eine Woche, um hier Statistiken zu sehen.</p>
+                      </div>
+                    ) : (
+                      <div className="h-48 w-full -ml-4">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={profile.multiplayer?.leagueHistory.map((h, i) => ({ 
+                            name: `W${i+1}`, 
+                            rank: h.rank,
+                            league: h.leagueName
+                          }))}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? '#334155' : '#e2e8f0'} />
+                            <XAxis 
+                              dataKey="name" 
+                              axisLine={false} 
+                              tickLine={false} 
+                              tick={{ fontSize: 10, fill: isDark ? '#94a3b8' : '#64748b' }} 
+                              dy={10} 
+                            />
+                            <YAxis 
+                              reversed={true} 
+                              domain={[1, 10]} 
+                              axisLine={false} 
+                              tickLine={false} 
+                              tick={{ fontSize: 10, fill: isDark ? '#94a3b8' : '#64748b' }} 
+                              dx={-10}
+                            />
+                            <Tooltip 
+                              contentStyle={{ 
+                                borderRadius: '12px', 
+                                border: 'none',
+                                boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
+                                backgroundColor: isDark ? '#1e293b' : '#ffffff',
+                                color: isDark ? '#f8fafc' : '#0f172a',
+                                fontWeight: 'bold'
+                              }}
+                              formatter={(value: any, name: any, props: any) => [
+                                `${value}. Platz (${props.payload.league})`, 'Rang'
+                              ]}
+                            />
+                            <Line 
+                              type="monotone" 
+                              dataKey="rank" 
+                              stroke="#3b82f6" 
+                              strokeWidth={3}
+                              dot={{ r: 4, strokeWidth: 2, fill: isDark ? '#1e293b' : '#ffffff' }}
+                              activeDot={{ r: 6, strokeWidth: 0 }}
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
                   </div>
-                ))}
-              </div>
+                  
+                  <div className="card p-6">
+                    <div className="flex items-center gap-3 mb-6">
+                      <div className="w-10 h-10 rounded-xl bg-orange-500/10 text-orange-500 flex items-center justify-center">
+                        <Medal className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-slate-900 dark:text-white">Aktuelle Erzrivalen</h3>
+                        <p className="text-xs text-slate-500">Die stärksten Gegner deiner Liga</p>
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-4">
+                      {multiplayerStandings.filter(p => !p.isUser).slice(0, 3).map((bot, i) => (
+                        <div key={bot.name} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800">
+                           <div className="flex items-center gap-3">
+                             <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-xs font-bold text-slate-600 dark:text-slate-400">
+                               #{i+1}
+                             </div>
+                             <span className="font-bold text-sm text-slate-700 dark:text-slate-300">{bot.name}</span>
+                           </div>
+                           <span className="text-xs font-bold text-slate-500">{Math.round(bot.points).toLocaleString()} Pkt</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
             </motion.div>
           )}
 
@@ -2539,6 +3282,70 @@ export default function App() {
           </div>
         )}
 
+        {isWeeklyRecapOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
+              onClick={() => setIsWeeklyRecapOpen(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-[32px] shadow-2xl overflow-hidden"
+            >
+              <div className="p-8 text-center bg-gradient-to-br from-primary to-blue-600">
+                <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border-2 border-white/30">
+                  <Trophy className="w-10 h-10 text-white" />
+                </div>
+                <h2 className="text-2xl font-black text-white uppercase tracking-tight">Wochen-Recap</h2>
+                <p className="text-blue-100 font-bold opacity-80">Deine Erfolge der Woche</p>
+              </div>
+
+              <div className="p-8 space-y-6">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-3xl text-center border border-slate-100 dark:border-slate-800">
+                    <p className="text-[10px] uppercase font-black text-slate-400 tracking-widest mb-1">Punkte</p>
+                    <p className="text-2xl font-display font-black text-primary">+{weeklyStats.points.toLocaleString()}</p>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-3xl text-center border border-slate-100 dark:border-slate-800">
+                    <p className="text-[10px] uppercase font-black text-slate-400 tracking-widest mb-1">Meldungen</p>
+                    <p className="text-2xl font-display font-black text-slate-800 dark:text-white">{weeklyStats.participations}</p>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-3xl text-center border border-slate-100 dark:border-slate-800">
+                    <p className="text-[10px] uppercase font-black text-slate-400 tracking-widest mb-1">Schnitt</p>
+                    <p className="text-2xl font-display font-black text-emerald-500">{weeklyStats.avgGrade || '-'}</p>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-3xl text-center border border-slate-100 dark:border-slate-800">
+                    <p className="text-[10px] uppercase font-black text-slate-400 tracking-widest mb-1">Aktive Tage</p>
+                    <p className="text-2xl font-display font-black text-amber-500">{weeklyStats.activeDays}/7</p>
+                  </div>
+                </div>
+
+                {weeklyStats.bestGrade && weeklyStats.bestGrade <= 2 && (
+                  <div className="flex items-center gap-4 p-4 bg-emerald-50 dark:bg-emerald-900/20 rounded-2xl border border-emerald-100 dark:border-emerald-800/30">
+                    <div className="w-10 h-10 bg-emerald-100 dark:bg-emerald-800 rounded-xl flex items-center justify-center text-emerald-600 font-black">1</div>
+                    <div>
+                      <p className="text-sm font-bold text-emerald-800 dark:text-emerald-300">Starke Leistung!</p>
+                      <p className="text-xs text-emerald-600/80 dark:text-emerald-500/80">Deine beste Note diese Woche war eine {weeklyStats.bestGrade}.</p>
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  onClick={() => setIsWeeklyRecapOpen(false)}
+                  className="w-full py-5 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-2xl font-bold hover:scale-[1.02] active:scale-95 transition-all shadow-xl shadow-slate-900/10 dark:shadow-white/5"
+                >
+                  Weiter geht's!
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
         {isApkModalOpen && (
           <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
             <motion.div 
@@ -2601,6 +3408,182 @@ export default function App() {
           </div>
         )}
 
+        {isAddGoalModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsAddGoalModalOpen(false)}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, y: 100, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 100, scale: 0.95 }}
+              className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 shadow-2xl dark:border dark:border-slate-800"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-display font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Target className="text-indigo-500 w-6 h-6" />
+                  Neues Ziel
+                </h2>
+                <button onClick={() => setIsAddGoalModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full cursor-pointer transition-colors">
+                  <X className="w-6 h-6 text-slate-400" />
+                </button>
+              </div>
+
+              <div className="space-y-4 mb-6">
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Art des Ziels</label>
+                  <select 
+                    value={newGoalType}
+                    onChange={(e) => {
+                      const type = e.target.value as any;
+                      setNewGoalType(type);
+                      setNewGoalTarget(type === 'practice_minutes' ? 30 : 5);
+                    }}
+                    className="w-full bg-slate-100 dark:bg-slate-800 dark:text-white rounded-xl px-4 py-3 font-bold appearance-none outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="participations">Im Unterricht melden</option>
+                    <option value="practice_minutes">Lernen / Üben</option>
+                  </select>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Wie oft / Wie lange?</label>
+                  {newGoalType === 'participations' ? (
+                    <select 
+                      value={newGoalTarget}
+                      onChange={(e) => setNewGoalTarget(Number(e.target.value))}
+                      className="w-full bg-slate-100 dark:bg-slate-800 dark:text-white rounded-xl px-4 py-3 font-bold appearance-none outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="1">1 mal</option>
+                      <option value="2">2 mal</option>
+                      <option value="3">3 mal</option>
+                      <option value="5">5 mal</option>
+                      <option value="10">10 mal</option>
+                      <option value="20">20 mal</option>
+                      <option value="50">50 mal</option>
+                    </select>
+                  ) : (
+                    <select 
+                      value={newGoalTarget}
+                      onChange={(e) => setNewGoalTarget(Number(e.target.value))}
+                      className="w-full bg-slate-100 dark:bg-slate-800 dark:text-white rounded-xl px-4 py-3 font-bold appearance-none outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="15">15 Minuten</option>
+                      <option value="30">30 Minuten</option>
+                      <option value="60">1 Stunde</option>
+                      <option value="120">2 Stunden</option>
+                      <option value="300">5 Stunden</option>
+                      <option value="600">10 Stunden</option>
+                    </select>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Wann? (Periode)</label>
+                  <select 
+                    value={newGoalPeriod}
+                    onChange={(e) => setNewGoalPeriod(e.target.value as any)}
+                    className="w-full bg-slate-100 dark:bg-slate-800 dark:text-white rounded-xl px-4 py-3 font-bold appearance-none outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="daily">Jeden Tag</option>
+                    <option value="weekly">Jede Woche</option>
+                    <option value="monthly">Jeden Monat</option>
+                  </select>
+                </div>
+              </div>
+              
+              <button 
+                onClick={handleAddGoal}
+                className="w-full bg-indigo-500 text-white font-bold py-4 rounded-2xl shadow-xl shadow-indigo-500/20 active:scale-[0.98] transition-all cursor-pointer"
+              >
+                Ziel hinzufügen
+              </button>
+            </motion.div>
+          </div>
+        )}
+
+        {isPracticeModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsPracticeModalOpen(false)}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, y: 100, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 100, scale: 0.95 }}
+              className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 shadow-2xl dark:border dark:border-slate-800"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-display font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Dumbbell className="text-indigo-500 w-6 h-6" />
+                  Geübt
+                </h2>
+                <button onClick={() => setIsPracticeModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full cursor-pointer transition-colors">
+                  <X className="w-6 h-6 text-slate-400" />
+                </button>
+              </div>
+
+              <div className="space-y-4 mb-6">
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Wie lange hast du geübt?</label>
+                  <select 
+                    value={practiceDuration}
+                    onChange={(e) => setPracticeDuration(Number(e.target.value))}
+                    className="w-full bg-slate-100 dark:bg-slate-800 dark:text-white rounded-xl px-4 py-3 font-bold appearance-none outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="15">15 Minuten</option>
+                    <option value="20">20 Minuten</option>
+                    <option value="25">25 Minuten</option>
+                    <option value="30">30 Minuten</option>
+                    <option value="45">45 Minuten</option>
+                    <option value="50">50 Minuten</option>
+                    <option value="60">60 Minuten</option>
+                    <option value="90">90 Minuten</option>
+                    <option value="120">120 Minuten</option>
+                  </select>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Welches Fach?</label>
+                  <select
+                    value={practiceSubject}
+                    onChange={(e) => setPracticeSubject(e.target.value)}
+                    className="w-full bg-slate-100 dark:bg-slate-800 dark:text-white rounded-xl px-4 py-3 font-bold appearance-none outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="">Kein Fach gewählt</option>
+                    {availableSubjects.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Was genau hast du gemacht? (Tagebuch)</label>
+                  <textarea 
+                    placeholder="Z.B. Vokabeln wiederholt, Mathe-Aufgaben gelöst..." 
+                    value={practiceNote}
+                    onChange={(e) => setPracticeNote(e.target.value)}
+                    className="w-full bg-slate-100 dark:bg-slate-800 dark:text-white rounded-xl px-4 py-3 font-semibold placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none focus:ring-2 focus:ring-indigo-500 resize-none h-24"
+                  />
+                </div>
+              </div>
+              
+              <button 
+                onClick={submitPractice}
+                className="w-full bg-indigo-500 text-white font-bold py-4 rounded-2xl shadow-xl shadow-indigo-500/20 active:scale-[0.98] transition-all cursor-pointer"
+              >
+                Eintragen (+{practiceDuration * 2} Pkt)
+              </button>
+            </motion.div>
+          </div>
+        )}
+
         {isTimerOpen && (
           <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
             <motion.div 
@@ -2630,16 +3613,16 @@ export default function App() {
               </div>
 
               <div className="p-6 flex flex-col items-center">
-                <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl mb-8 w-full">
+                <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl mb-6 w-full">
                   <button 
                     onClick={() => {
                       setTimerMode('focus');
-                      setTimeLeft(25 * 60);
+                      setTimeLeft(timerDuration * 60);
                       setIsTimerActive(false);
                     }}
                     className={`flex-1 py-2 text-sm font-bold rounded-xl transition-all ${timerMode === 'focus' ? 'bg-white dark:bg-slate-700 text-indigo-500 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
                   >
-                    Fokus (25m)
+                    Fokus ({timerDuration}m)
                   </button>
                   <button 
                     onClick={() => {
@@ -2653,6 +3636,47 @@ export default function App() {
                   </button>
                 </div>
 
+                {timerMode === 'focus' && (
+                  <div className="w-full space-y-3 mb-6">
+                    <div className="flex gap-2">
+                      <select 
+                        value={timerDuration}
+                        onChange={(e) => { 
+                          setTimerDuration(Number(e.target.value)); 
+                          setTimeLeft(Number(e.target.value) * 60); 
+                        }}
+                        disabled={isTimerActive}
+                        className="flex-1 bg-slate-100 dark:bg-slate-800 dark:text-white rounded-xl px-3 py-2 text-sm font-bold disabled:opacity-50 appearance-none text-center"
+                      >
+                        <option value="15">15 Min</option>
+                        <option value="25">25 Min</option>
+                        <option value="30">30 Min</option>
+                        <option value="45">45 Min</option>
+                        <option value="50">50 Min</option>
+                        <option value="60">60 Min</option>
+                        <option value="90">90 Min</option>
+                      </select>
+                      <select
+                        value={timerSubject}
+                        onChange={(e) => setTimerSubject(e.target.value)}
+                        disabled={isTimerActive}
+                        className="flex-[2] bg-slate-100 dark:bg-slate-800 dark:text-white rounded-xl px-3 py-2 text-sm font-bold disabled:opacity-50 appearance-none text-center"
+                      >
+                        <option value="">Kein Fach gewählt</option>
+                        {availableSubjects.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                    <input 
+                      type="text" 
+                      placeholder="Was übst du? (Tagebuch)" 
+                      value={timerNote}
+                      onChange={(e) => setTimerNote(e.target.value)}
+                      disabled={isTimerActive}
+                      className="w-full bg-slate-100 dark:bg-slate-800 dark:text-white rounded-xl px-3 py-2 text-sm font-bold disabled:opacity-50 placeholder:text-slate-400 dark:placeholder:text-slate-500"
+                    />
+                  </div>
+                )}
+
                 <div className="relative w-48 h-48 flex items-center justify-center mb-8">
                   <svg className="absolute inset-0 w-full h-full transform -rotate-90">
                     <circle cx="96" cy="96" r="88" className="stroke-slate-100 dark:stroke-slate-800" strokeWidth="8" fill="none" />
@@ -2664,7 +3688,7 @@ export default function App() {
                       strokeWidth="8" 
                       fill="none" 
                       strokeDasharray={2 * Math.PI * 88}
-                      strokeDashoffset={2 * Math.PI * 88 * (1 - timeLeft / (timerMode === 'focus' ? 25 * 60 : 5 * 60))}
+                      strokeDashoffset={2 * Math.PI * 88 * (1 - timeLeft / (timerMode === 'focus' ? timerDuration * 60 : 5 * 60))}
                       strokeLinecap="round"
                     />
                   </svg>
@@ -2696,7 +3720,7 @@ export default function App() {
                   <button 
                     onClick={() => {
                       setIsTimerActive(false);
-                      setTimeLeft(timerMode === 'focus' ? 25 * 60 : 5 * 60);
+                      setTimeLeft(timerMode === 'focus' ? timerDuration * 60 : 5 * 60);
                     }}
                     className="w-14 h-14 shrink-0 flex items-center justify-center rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors active:scale-[0.98]"
                   >
