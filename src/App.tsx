@@ -38,6 +38,7 @@ import {
   Lock,
   Flame,
   Download,
+  Upload,
   BookOpen,
   Menu,
   Users,
@@ -1920,6 +1921,48 @@ export default function App() {
     });
   }, [profile]);
 
+  const handleExportData = () => {
+    const data = {
+      profile: localStorage.getItem('klassenheld_profile'),
+      users: localStorage.getItem('kh_users'),
+      theme: localStorage.getItem('theme_color')
+    };
+    const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `klassenheld-backup-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setIsSidebarOpen(false);
+  };
+
+  const handleImportData = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json';
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = (re) => {
+          try {
+            const data = JSON.parse(re.target?.result as string);
+            if (data.profile) localStorage.setItem('klassenheld_profile', data.profile);
+            if (data.users) localStorage.setItem('kh_users', data.users);
+            if (data.theme) localStorage.setItem('theme_color', data.theme);
+            window.location.reload();
+          } catch(err) {
+            alert('Fehler beim Importieren der Datei. Bitte überprüfe das Format.');
+          }
+        };
+        reader.readAsText(file);
+      }
+    };
+    input.click();
+    setIsSidebarOpen(false);
+  };
+
   // --- Dev Mode Actions ---
   const handleDevPointsChange = (amount: number) => {
     setProfile(prev => ({ ...prev, points: prev.points + amount }));
@@ -3672,6 +3715,22 @@ export default function App() {
                       <span className="text-[10px] uppercase tracking-wider font-bold bg-pink-100 text-pink-600 dark:bg-pink-900/50 dark:text-pink-400 px-2 py-0.5 rounded-full border border-pink-200 dark:border-pink-800">Beta</span>
                     </div>
                     <ChevronRight className="w-4 h-4 opacity-50 group-hover:opacity-100 transition-opacity" />
+                  </button>
+
+                  <div className="px-3 py-2 mt-4">
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Daten</p>
+                  </div>
+                  <button onClick={handleExportData} className="w-full flex items-center gap-3 px-3 py-3 text-left rounded-xl transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50 group text-slate-600 dark:text-slate-300">
+                    <Download className="w-5 h-5" />
+                    <div className="flex-1">
+                      <span className="font-bold flex items-center gap-2">Fortschritt exportieren</span>
+                    </div>
+                  </button>
+                  <button onClick={handleImportData} className="w-full flex items-center gap-3 px-3 py-3 text-left rounded-xl transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50 group text-slate-600 dark:text-slate-300">
+                    <Upload className="w-5 h-5" />
+                    <div className="flex-1">
+                      <span className="font-bold flex items-center gap-2">Fortschritt importieren</span>
+                    </div>
                   </button>
                 </div>
               </div>
