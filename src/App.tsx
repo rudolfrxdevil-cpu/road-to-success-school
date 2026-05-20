@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { QuizQuestion, ENGLISH_QUIZ_QUESTIONS, MATH_QUIZ_QUESTIONS, FRENCH_QUIZ_QUESTIONS, GERMAN_QUIZ_QUESTIONS } from './lib/quizData';
 import confetti from 'canvas-confetti';
 import { 
   Trophy, 
@@ -45,8 +46,26 @@ import {
   Pause,
   RotateCcw,
   Dumbbell,
-  Globe
+  Globe,
+  Check,
+  Languages,
+  Brain,
+  Gamepad2,
+  Swords,
+  Ghost,
+  Bell,
+  ListTodo,
+  ChevronLeft,
+  Smartphone,
+  Heart,
+  MessageCircle,
+  Share2,
+  Home,
+  Plus,
+  User as UserIcon,
+  ImagePlus
 } from 'lucide-react';
+import { SOCIAL_POSTS, SocialPost } from './lib/socialPosts';
 import { 
   BarChart, 
   Bar, 
@@ -67,7 +86,7 @@ type Grade = 1 | 2 | 3 | 4 | 5 | 6;
 
 interface HistoryEntry {
   id: string;
-  type: 'participation' | 'grade' | 'challenge';
+  type: 'participation' | 'grade' | 'challenge' | 'homework' | 'penalty' | 'vocab';
   value: number | Grade | string;
   points: number;
   date: number;
@@ -75,6 +94,23 @@ interface HistoryEntry {
   subject?: string;
   focusNote?: string;
   focusDuration?: number;
+}
+
+interface VocabWord {
+  id: string;
+  front: string;
+  back: string;
+  lastTested?: number;
+  correctCount: number;
+  wrongCount: number;
+}
+
+interface VocabList {
+  id: string;
+  title: string;
+  subject: string;
+  words: VocabWord[];
+  createdAt: number;
 }
 
 interface ScheduleSlot {
@@ -128,7 +164,25 @@ interface BotOnlineChallenge {
   rewardPoints: number;
   target: number;
   subject?: string;
-  participants: { name: string; score: number; isBot: boolean }[];
+  participants: { name: string; score: number; isBot: boolean; joinedAt?: number }[];
+}
+
+interface CalendarEvent {
+  id: string;
+  date: number; // Start of day timestamp
+  title: string;
+  type: 'exam' | 'term' | 'other';
+  reminderDate?: number; // Start of day timestamp for reminder
+}
+
+interface Homework {
+  id: string;
+  subject: string;
+  task?: string;
+  dueDate: number;
+  createdAt: number;
+  completed?: boolean;
+  missed?: boolean;
 }
 
 interface UserProfile {
@@ -145,6 +199,12 @@ interface UserProfile {
   unlockedAchievements?: string[];
   multiplayer?: MultiplayerData;
   goals?: PersonalGoal[];
+  homework?: Homework[];
+  vocabLists?: VocabList[];
+  vocabStreak?: number;
+  lastVocabDate?: number;
+  calendarEvents?: CalendarEvent[];
+  dismissedReminders?: string[]; // IDs of events we already reminded about today
 }
 
 type Tab = 'dashboard' | 'schedule' | 'stats' | 'achievements' | 'multiplayer' | 'online-challenges' | 'dev';
@@ -1050,8 +1110,58 @@ export default function App() {
           newStreak = 1;
         }
         
-        if (prev.lastLoginDate !== today || prev.streak !== newStreak) {
-          return { ...prev, lastLoginDate: today, streak: newStreak };
+        let updatedHomework = [...(prev.homework || [])];
+        let homeworkPenalty = 0;
+        let newHistoryEntries: HistoryEntry[] = [];
+
+        updatedHomework = updatedHomework.map(hw => {
+            if (!hw.completed && !hw.missed && new Date(hw.dueDate).getTime() < today) {
+                homeworkPenalty += 25;
+                newHistoryEntries.push({
+                   id: Math.random().toString(36).substr(2, 9),
+                   type: 'penalty',
+                   date: today,
+                   points: -25,
+                   value: -25,
+                   comment: `Hausaufgabe verpasst: ${hw.subject}`
+                });
+                return { ...hw, missed: true };
+            }
+            return hw;
+        });
+
+        // Vocab Streak zurücksetzen, falls abgelaufen
+        let newVocabStreak = prev.vocabStreak || 0;
+        if (prev.lastVocabDate) {
+            const lastVocabDay = new Date(new Date(prev.lastVocabDate).getFullYear(), new Date(prev.lastVocabDate).getMonth(), new Date(prev.lastVocabDate).getDate()).getTime();
+            if (today - lastVocabDay > oneDay) {
+                newVocabStreak = 0;
+            }
+        }
+
+        // Reminders checken
+        if (prev.calendarEvents) {
+            const reminders = prev.calendarEvents.filter(ev => {
+               if (ev.reminderDate && ev.reminderDate <= today) {
+                   return !(prev.dismissedReminders || []).includes(ev.id);
+               }
+               return false;
+            });
+            if (reminders.length > 0) {
+               setRemindersToShow(reminders);
+            }
+        }
+
+        if (prev.lastLoginDate !== today || prev.streak !== newStreak || homeworkPenalty > 0 || newVocabStreak !== prev.vocabStreak) {
+          return { 
+            ...prev, 
+            lastLoginDate: today, 
+            streak: newStreak, 
+            vocabStreak: newVocabStreak,
+            homework: updatedHomework,
+            points: Math.max(0, prev.points - homeworkPenalty),
+            history: [...newHistoryEntries, ...prev.history]
+          };
         }
         return prev;
       });
@@ -1072,6 +1182,77 @@ export default function App() {
   const [newGoalTarget, setNewGoalTarget] = useState(5);
   const [newGoalPeriod, setNewGoalPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isHomeworkOpen, setIsHomeworkOpen] = useState(false);
+  const [isAddingHomework, setIsAddingHomework] = useState(false);
+  const [homeworkSubject, setHomeworkSubject] = useState('');
+  const [homeworkTask, setHomeworkTask] = useState('');
+  const [homeworkDate, setHomeworkDate] = useState('');
+  
+  // Vocab State
+  const [isVocabOpen, setIsVocabOpen] = useState(false);
+  
+  // Calendar State
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  const [calendarDate, setCalendarDate] = useState<Date>(new Date());
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState<Date | null>(null);
+  const [isAddingEvent, setIsAddingEvent] = useState(false);
+  const [newEventTitle, setNewEventTitle] = useState('');
+  const [newEventType, setNewEventType] = useState<'exam' | 'term' | 'other'>('exam');
+  const [newEventReminder, setNewEventReminder] = useState<number | null>(null); // days before
+  const [remindersToShow, setRemindersToShow] = useState<CalendarEvent[]>([]);
+  const [isSocialOpen, setIsSocialOpen] = useState(false);
+  const [socialView, setSocialView] = useState<'fyp' | 'create' | 'profile'>('fyp');
+  const [socialProfileTab, setSocialProfileTab] = useState<'posts' | 'likes'>('posts');
+  const [viewingSocialPost, setViewingSocialPost] = useState<SocialPost | null>(null);
+  const [userSocialPosts, setUserSocialPosts] = useState<SocialPost[]>([]);
+  const [socialFollowers, setSocialFollowers] = useState(() => Math.floor(Math.random() * 50) + 10);
+  const [createPostContent, setCreatePostContent] = useState('');
+  const [createPostMediaUrl, setCreatePostMediaUrl] = useState<string | null>(null);
+  const [createPostMediaType, setCreatePostMediaType] = useState<'image' | 'video' | null>(null);
+
+  // Quiz VS State
+  const [isQuizVsOpen, setIsQuizVsOpen] = useState(false);
+  const [quizVsView, setQuizVsView] = useState<'subject_select' | 'difficulty_select' | 'play'>('subject_select');
+  const [quizVsSubject, setQuizVsSubject] = useState<string>('Englisch');
+  const [quizVsSession, setQuizVsSession] = useState<{
+    questions: QuizQuestion[];
+    currentIndex: number;
+    userScore: number;
+    botScore: number;
+    botName: string;
+    difficulty: 'easy' | 'medium' | 'hard';
+    gameStatus: 'playing' | 'question_finished' | 'game_over';
+    questionWinner: 'user' | 'bot' | null;
+    selectedOptions: Record<string, boolean>; // track which options user already clicked wrong for current question
+  } | null>(null);
+
+  const [vocabView, setVocabView] = useState<'lists' | 'create_list' | 'edit_list' | 'learn' | 'stats' | 'versus_setup' | 'versus_play'>('lists');
+  const [versusSession, setVersusSession] = useState<{
+    listId: string;
+    words: VocabWord[];
+    currentIndex: number;
+    userScore: number;
+    botScore: number;
+    botName: string;
+    difficulty: 'easy' | 'medium' | 'hard';
+    gameStatus: 'playing' | 'word_finished' | 'game_over';
+    wordWinner: 'user' | 'bot' | null;
+    currentInput: string;
+    targetIsFront: boolean;
+  } | null>(null);
+  const [currentVocabList, setCurrentVocabList] = useState<VocabList | null>(null);
+  const [newVocabListTitle, setNewVocabListTitle] = useState('');
+  const [newVocabListSubject, setNewVocabListSubject] = useState('');
+  const [newVocabWords, setNewVocabWords] = useState<{front: string, back: string}[]>([{front: '', back: ''}]);
+  const [learnSession, setLearnSession] = useState<{
+    listId: string;
+    words: VocabWord[];
+    currentIndex: number;
+    flipped: boolean;
+    correct: number;
+    wrong: number;
+  } | null>(null);
+
   const [isWeeklyRecapOpen, setIsWeeklyRecapOpen] = useState(false);
   const [isDevMode, setIsDevMode] = useState(false);
   const [devResetClicks, setDevResetClicks] = useState(0);
@@ -1085,6 +1266,107 @@ export default function App() {
   const [partMode, setPartMode] = useState<'total' | 'subject'>('total');
   const [partTotal, setPartTotal] = useState<number>(1);
   const [partSubjects, setPartSubjects] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    if (vocabView === 'versus_play' && versusSession?.gameStatus === 'playing') {
+      let minTime, maxTime;
+      if (versusSession.difficulty === 'easy') { minTime = 10000; maxTime = 15000; }
+      else if (versusSession.difficulty === 'medium') { minTime = 7000; maxTime = 12000; }
+      else { minTime = 5000; maxTime = 8000; }
+
+      const botDelay = Math.random() * (maxTime - minTime) + minTime;
+
+      const botTimeout = setTimeout(() => {
+        setVersusSession(prev => {
+          if (!prev || prev.gameStatus !== 'playing') return prev;
+          return {
+            ...prev,
+            gameStatus: 'word_finished',
+            botScore: prev.botScore + 1,
+            wordWinner: 'bot',
+          };
+        });
+      }, botDelay);
+
+      return () => clearTimeout(botTimeout);
+    }
+  }, [vocabView, versusSession?.gameStatus, versusSession?.currentIndex, versusSession?.difficulty]);
+
+  useEffect(() => {
+    if (quizVsView === 'play' && quizVsSession?.gameStatus === 'playing') {
+      let minTime, maxTime;
+      if (quizVsSession.difficulty === 'easy') { minTime = 10000; maxTime = 15000; }
+      else if (quizVsSession.difficulty === 'medium') { minTime = 7000; maxTime = 12000; }
+      else { minTime = 5000; maxTime = 8000; }
+
+      const botDelay = Math.random() * (maxTime - minTime) + minTime;
+
+      const botTimeout = setTimeout(() => {
+        setQuizVsSession(prev => {
+          if (!prev || prev.gameStatus !== 'playing') return prev;
+          return {
+            ...prev,
+            gameStatus: 'question_finished',
+            botScore: prev.botScore + 1,
+            questionWinner: 'bot',
+          };
+        });
+      }, botDelay);
+
+      return () => clearTimeout(botTimeout);
+    }
+  }, [quizVsView, quizVsSession?.gameStatus, quizVsSession?.currentIndex, quizVsSession?.difficulty]);
+
+  useEffect(() => {
+    if (vocabView === 'versus_play' && versusSession?.gameStatus === 'word_finished') {
+      const nextTimeout = setTimeout(() => {
+        setVersusSession(prev => {
+          if (!prev) return prev;
+          if (prev.currentIndex + 1 < prev.words.length) {
+            return {
+              ...prev,
+              currentIndex: prev.currentIndex + 1,
+              gameStatus: 'playing',
+              wordWinner: null,
+              currentInput: '',
+              targetIsFront: Math.random() > 0.5
+            };
+          } else {
+            return {
+              ...prev,
+              gameStatus: 'game_over'
+            };
+          }
+        });
+      }, 2500);
+      return () => clearTimeout(nextTimeout);
+    }
+  }, [vocabView, versusSession?.gameStatus, versusSession?.currentIndex]);
+
+  useEffect(() => {
+    if (quizVsView === 'play' && quizVsSession?.gameStatus === 'question_finished') {
+      const nextTimeout = setTimeout(() => {
+        setQuizVsSession(prev => {
+          if (!prev) return prev;
+          if (prev.currentIndex + 1 < prev.questions.length) {
+            return {
+              ...prev,
+              currentIndex: prev.currentIndex + 1,
+              gameStatus: 'playing',
+              questionWinner: null,
+              selectedOptions: {}
+            };
+          } else {
+            return {
+              ...prev,
+              gameStatus: 'game_over'
+            };
+          }
+        });
+      }, 2500);
+      return () => clearTimeout(nextTimeout);
+    }
+  }, [quizVsView, quizVsSession?.gameStatus, quizVsSession?.currentIndex]);
   const [selectedSubject, setSelectedSubject] = useState("");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isApkModalOpen, setIsApkModalOpen] = useState(false);
@@ -1793,6 +2075,59 @@ export default function App() {
     setPracticeNote("");
   };
 
+  const startQuizVsMatch = (difficulty: 'easy' | 'medium' | 'hard') => {
+     let allQuestions = quizVsSubject === 'Mathe' ? MATH_QUIZ_QUESTIONS : quizVsSubject === 'Französisch' ? FRENCH_QUIZ_QUESTIONS : quizVsSubject === 'Deutsch' ? GERMAN_QUIZ_QUESTIONS : ENGLISH_QUIZ_QUESTIONS;
+     const suitableQ = allQuestions.filter(q => q.difficulty === difficulty).sort(() => 0.5 - Math.random()).slice(0, 5);
+     // Fallback if not enough questions available for the difficulty
+     if (suitableQ.length < 5) {
+        const extra = allQuestions.filter(q => !suitableQ.includes(q)).sort(() => 0.5 - Math.random()).slice(0, 5 - suitableQ.length);
+        suitableQ.push(...extra);
+     }
+     const botName = BOT_NAMES[Math.floor(Math.random() * BOT_NAMES.length)];
+     setQuizVsSession({
+        questions: suitableQ,
+        currentIndex: 0,
+        userScore: 0,
+        botScore: 0,
+        botName,
+        difficulty,
+        gameStatus: 'playing',
+        questionWinner: null,
+        selectedOptions: {}
+     });
+     setQuizVsView('play');
+  };
+
+  const handleQuizVsAnswer = (option: string) => {
+     if (!quizVsSession || quizVsSession.gameStatus !== 'playing') return;
+     const currentQ = quizVsSession.questions[quizVsSession.currentIndex];
+     if (option === currentQ.correctAnswer) {
+        setQuizVsSession(prev => {
+          if (!prev) return prev;
+          return {
+             ...prev,
+             userScore: prev.userScore + 1,
+             gameStatus: 'question_finished',
+             questionWinner: 'user'
+          };
+        });
+     } else {
+        setQuizVsSession(prev => {
+          if (!prev) return prev;
+          return {
+             ...prev,
+             botScore: prev.botScore + 1,
+             gameStatus: 'question_finished',
+             questionWinner: 'bot',
+             selectedOptions: {
+                ...prev.selectedOptions,
+                [option]: true
+             }
+          };
+        });
+     }
+  };
+
   const handleAddGoal = () => {
     const newGoal: PersonalGoal = {
       id: Math.random().toString(36).substr(2, 9),
@@ -1845,7 +2180,7 @@ export default function App() {
                ...c,
                participants: [
                  ...c.participants,
-                 { name: prev.name || "Du", score: 0, isBot: false }
+                 { name: prev.name || "Du", score: 0, isBot: false, joinedAt: Date.now() }
                ]
             };
          }
@@ -2442,19 +2777,27 @@ export default function App() {
                       {(!profile.schedule[dayIndex] || profile.schedule[dayIndex].length === 0) ? (
                         <p className="text-xs text-slate-400 font-medium italic pl-4">Keine Fächer eingetragen</p>
                       ) : (
-                        profile.schedule[dayIndex].map((slot) => (
+                        profile.schedule[dayIndex].map((slot) => {
+                          const pendingHomework = (profile.homework || []).filter(hw => hw.subject === slot.subject && !hw.completed);
+                          const hasHomework = pendingHomework.length > 0;
+                          const tmrw = new Date();
+                          tmrw.setDate(tmrw.getDate() + 1);
+                          const isTmrw = pendingHomework.some(hw => new Date(hw.dueDate).toDateString() === tmrw.toDateString());
+                          const isToday = pendingHomework.some(hw => new Date(hw.dueDate).toDateString() === new Date().toDateString());
+                          const isUrgent = isTmrw || isToday;
+                          return (
                           <div 
                             key={slot.id} 
                             onClick={() => setSubjectDetails(slot.subject)}
-                            className="flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/50 p-3 rounded-2xl border border-slate-100 dark:border-slate-800 group cursor-pointer hover:bg-white dark:hover:bg-slate-800 hover:shadow-sm hover:-translate-y-0.5 transition-all duration-300"
+                            className={`flex items-center justify-between p-3 rounded-2xl border group cursor-pointer hover:-translate-y-0.5 transition-all duration-300 ${hasHomework ? (isUrgent ? 'bg-red-50 dark:bg-red-900/10 border-red-400 shadow-[0_0_15px_rgba(248,113,113,0.2)] hover:bg-red-100 dark:hover:bg-red-900/20' : 'bg-amber-50 dark:bg-amber-900/10 border-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.2)] hover:bg-amber-100 dark:hover:bg-amber-900/20') : 'bg-slate-50/50 dark:bg-slate-800/50 border-slate-100 dark:border-slate-800 hover:bg-white dark:hover:bg-slate-800 hover:shadow-sm'}`}
                           >
                             <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 bg-white dark:bg-slate-900 rounded-lg flex items-center justify-center shadow-sm">
-                                <Clock className="w-4 h-4 text-slate-400 dark:text-slate-500" />
+                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm ${hasHomework ? (isUrgent ? 'bg-red-100 dark:bg-red-800' : 'bg-amber-100 dark:bg-amber-800') : 'bg-white dark:bg-slate-900'}`}>
+                                {hasHomework ? <BookOpen className={`w-4 h-4 ${isUrgent ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}`} /> : <Clock className="w-4 h-4 text-slate-400 dark:text-slate-500" />}
                               </div>
                               <div>
                                 <p className="text-sm font-bold text-slate-800 dark:text-slate-200">{slot.subject}</p>
-                                {slot.time && <p className="text-[10px] text-slate-400 font-bold uppercase">{slot.time} Uhr</p>}
+                                {slot.time && <p className={`text-[10px] font-bold uppercase ${hasHomework ? (isUrgent ? 'text-red-600/70 dark:text-red-400/70' : 'text-amber-600/70 dark:text-amber-400/70') : 'text-slate-400'}`}>{slot.time} Uhr</p>}
                               </div>
                             </div>
                             <button 
@@ -2464,7 +2807,7 @@ export default function App() {
                               <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
-                        ))
+                        )})
                       )}
                     </div>
                   </div>
@@ -3008,7 +3351,13 @@ export default function App() {
 
               {profile.multiplayer?.onlineChallenges?.length ? (
                 <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-                  {profile.multiplayer.onlineChallenges.map(chal => {
+                  {[...(profile.multiplayer.onlineChallenges || [])].sort((a,b) => {
+                     const aHas = a.participants.some(p => !p.isBot);
+                     const bHas = b.participants.some(p => !p.isBot);
+                     if (aHas && !bHas) return -1;
+                     if (!aHas && bHas) return 1;
+                     return 0;
+                  }).map(chal => {
                     const userParticipant = chal.participants.find(p => !p.isBot);
                     const userScore = userParticipant?.score || 0;
                     
@@ -3076,13 +3425,23 @@ export default function App() {
                           ) : (
                              <button
                                onClick={() => {
+                                  if (userParticipant.joinedAt && new Date(userParticipant.joinedAt).setHours(0,0,0,0) >= new Date().setHours(0,0,0,0)) {
+                                     alert('Du kannst erst am nächsten Tag nach dem Beitritt Fortschritt eintragen!');
+                                     return;
+                                  }
                                   setSelectedChallengeId(chal.id);
                                   setIsChallengeProgressModalOpen(true);
                                   setChallengeProgressInput(0);
                                }}
-                               className="w-full bg-indigo-500 text-white font-bold py-3 rounded-xl transition-transform active:scale-95 shadow-lg shadow-indigo-500/20"
+                               className={`w-full font-bold py-3 rounded-xl transition-all shadow-lg ${
+                                 userParticipant.joinedAt && new Date(userParticipant.joinedAt).setHours(0,0,0,0) >= new Date().setHours(0,0,0,0)
+                                   ? 'bg-slate-300 dark:bg-slate-700 text-slate-500 cursor-not-allowed shadow-none'
+                                   : 'bg-indigo-500 text-white active:scale-95 shadow-indigo-500/20 hover:bg-indigo-600'
+                               }`}
                              >
-                               Fortschritt eintragen
+                               {userParticipant.joinedAt && new Date(userParticipant.joinedAt).setHours(0,0,0,0) >= new Date().setHours(0,0,0,0)
+                                 ? 'Morgen Fortschritt eintragen'
+                                 : 'Fortschritt eintragen'}
                              </button>
                           )}
                         </div>
@@ -3151,6 +3510,18 @@ export default function App() {
                 <div className="p-4 bg-danger/5 border border-danger/20 rounded-2xl">
                   <p className="text-xs text-danger font-medium">Diese Aktionen verändern die Datenbank permanent.</p>
                 </div>
+                <button
+                  onClick={() => {
+                     setProfile(prev => ({
+                        ...prev,
+                        multiplayer: initMultiplayerData(prev.multiplayer?.leagueLevel || 0, getMonday(Date.now()))
+                     }));
+                     triggerCelebration("Challenges generiert", "Entwickler-Feature");
+                  }}
+                  className="w-full py-4 border-2 border-indigo-500/20 text-indigo-500 font-bold rounded-2xl hover:bg-indigo-500 hover:text-white transition-all mb-4"
+                >
+                  Challenges neu generieren
+                </button>
                 <button 
                   onClick={() => {
                     if (devResetClicks < 4) {
@@ -3261,8 +3632,1941 @@ export default function App() {
                     </div>
                     <ChevronRight className="w-4 h-4 opacity-50 group-hover:opacity-100 transition-opacity" />
                   </button>
+
+                  <div className="px-3 py-2 mt-4">
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Schule</p>
+                  </div>
+                  <button onClick={() => { setIsHomeworkOpen(true); setIsSidebarOpen(false); }} className="w-full flex items-center gap-3 px-3 py-3 text-left rounded-xl transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50 group text-slate-600 dark:text-slate-300">
+                    <BookOpen className="w-5 h-5" />
+                    <div className="flex-1">
+                      <span className="font-bold flex items-center gap-2">Hausaufgaben</span>
+                    </div>
+                    <ChevronRight className="w-4 h-4 opacity-50 group-hover:opacity-100 transition-opacity" />
+                  </button>
+                  <button onClick={() => { setIsVocabOpen(true); setVocabView('lists'); setIsSidebarOpen(false); }} className="w-full flex items-center gap-3 px-3 py-3 text-left rounded-xl transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50 group text-slate-600 dark:text-slate-300">
+                    <Languages className="w-5 h-5" />
+                    <div className="flex-1">
+                      <span className="font-bold flex items-center gap-2">Vokabeln</span>
+                    </div>
+                    <ChevronRight className="w-4 h-4 opacity-50 group-hover:opacity-100 transition-opacity" />
+                  </button>
+                  <button onClick={() => { setIsCalendarOpen(true); setIsSidebarOpen(false); }} className="w-full flex items-center gap-3 px-3 py-3 text-left rounded-xl transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50 group text-slate-600 dark:text-slate-300">
+                    <Calendar className="w-5 h-5" />
+                    <div className="flex-1">
+                      <span className="font-bold flex items-center gap-2">Kalender</span>
+                    </div>
+                    <ChevronRight className="w-4 h-4 opacity-50 group-hover:opacity-100 transition-opacity" />
+                  </button>
+                  <button onClick={() => { setIsQuizVsOpen(true); setQuizVsView('subject_select'); setIsSidebarOpen(false); }} className="w-full flex items-center gap-3 px-3 py-3 text-left rounded-xl transition-colors hover:bg-indigo-50 dark:hover:bg-indigo-900/20 group text-indigo-600 dark:text-indigo-400">
+                    <Swords className="w-5 h-5" />
+                    <div className="flex-1 flex items-center gap-2">
+                      <span className="font-bold">Versus Mode</span>
+                      <span className="text-[10px] uppercase tracking-wider font-bold bg-indigo-100 text-indigo-600 dark:bg-indigo-900/50 dark:text-indigo-400 px-2 py-0.5 rounded-full border border-indigo-200 dark:border-indigo-800">Beta</span>
+                    </div>
+                    <ChevronRight className="w-4 h-4 opacity-50 group-hover:opacity-100 transition-opacity" />
+                  </button>
+                  <button onClick={() => { setIsSocialOpen(true); setIsSidebarOpen(false); }} className="w-full flex items-center gap-3 px-3 py-3 text-left rounded-xl transition-colors hover:bg-pink-50 dark:hover:bg-pink-900/20 group text-pink-600 dark:text-pink-400">
+                    <Smartphone className="w-5 h-5" />
+                    <div className="flex-1 flex items-center gap-2">
+                      <span className="font-bold">Social FYP</span>
+                      <span className="text-[10px] uppercase tracking-wider font-bold bg-pink-100 text-pink-600 dark:bg-pink-900/50 dark:text-pink-400 px-2 py-0.5 rounded-full border border-pink-200 dark:border-pink-800">Beta</span>
+                    </div>
+                    <ChevronRight className="w-4 h-4 opacity-50 group-hover:opacity-100 transition-opacity" />
+                  </button>
                 </div>
               </div>
+            </motion.div>
+          </div>
+        )}
+
+        {isHomeworkOpen && (
+          <div key="modal-homework" className="fixed inset-0 z-50 flex flex-col bg-slate-50 dark:bg-slate-900">
+            <motion.div 
+              initial={{ opacity: 0, y: 50 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 50 }}
+              className="absolute inset-0 flex flex-col pt-safe pb-safe"
+            >
+              <div className="flex items-center justify-between p-4 sm:p-6 border-b border-slate-200 dark:border-slate-800 shrink-0 bg-white dark:bg-slate-900 z-10 shadow-sm">
+                 <h2 className="text-xl sm:text-2xl font-display font-bold text-slate-900 dark:text-white flex items-center gap-3">
+                   <BookOpen className="w-6 h-6 text-primary" />
+                   Hausaufgaben
+                 </h2>
+                 <button onClick={() => setIsHomeworkOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full cursor-pointer transition-colors">
+                   <X className="w-6 h-6 text-slate-400" />
+                 </button>
+              </div>
+
+              {!isAddingHomework ? (
+                <>
+                  <div className="flex-1 overflow-y-auto p-4 sm:p-6 pb-[env(safe-area-inset-bottom)]">
+                    {!(profile.homework?.filter(h => !h.completed)?.length) ? (
+                      <div className="flex flex-col items-center justify-center h-full text-center mt-10">
+                        <BookOpen className="w-16 h-16 text-slate-300 dark:text-slate-700 mb-4" />
+                        <h3 className="text-lg font-bold text-slate-700 dark:text-slate-300">Keine Hausaufgaben</h3>
+                        <p className="text-slate-500">Du hast alles erledigt! Zurücklehnen und entspannen.</p>
+                      </div>
+                    ) : (
+                      <div className="max-w-2xl mx-auto space-y-3">
+                        {[...(profile.homework || [])].filter(h => !h.completed).sort((a,b) => a.dueDate - b.dueDate).map(hw => {
+                          const dateObj = new Date(hw.dueDate);
+                          const isToday = new Date().toDateString() === dateObj.toDateString();
+                          const isTmrw = (() => {
+                             const tmrw = new Date();
+                             tmrw.setDate(tmrw.getDate() + 1);
+                             return tmrw.toDateString() === dateObj.toDateString();
+                          })();
+
+                          return (
+                            <div key={hw.id} className="p-4 bg-white dark:bg-slate-800 rounded-2xl flex items-center justify-between border border-slate-200 dark:border-slate-700 shadow-sm">
+                              <div>
+                                <h4 className="font-bold text-slate-900 dark:text-white text-lg">{hw.subject}</h4>
+                                {hw.task && <p className="text-slate-600 dark:text-slate-300">{hw.task}</p>}
+                                <span className={`text-sm font-bold ${isTmrw || isToday ? 'text-danger' : 'text-slate-500'} mt-1 block`}>
+                                  {isToday ? "Bis heute" : isTmrw ? "Bis morgen" : `Bis ${dateObj.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' })}`}
+                                </span>
+                              </div>
+                              <button 
+                                onClick={() => {
+                                  setProfile(prev => ({
+                                    ...prev,
+                                    points: prev.points + 10,
+                                    history: [
+                                      {
+                                        id: Math.random().toString(36).substr(2, 9),
+                                        date: Date.now(),
+                                        type: 'homework',
+                                        points: 10,
+                                        value: 10,
+                                        comment: `Hausaufgabe erledigt: ${hw.subject}`
+                                      },
+                                      ...prev.history
+                                    ],
+                                    homework: (prev.homework || []).map(h => h.id === hw.id ? { ...h, completed: true } : h)
+                                  }));
+                                  triggerCelebration("Hausaufgabe erledigt!", "+10 Punkte gesammelt");
+                                }}
+                                className="w-12 h-12 rounded-full border-2 border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-400 hover:bg-success hover:text-white hover:border-success transition-all cursor-pointer bg-slate-50 dark:bg-slate-900"
+                              >
+                                <Check className="w-6 h-6" />
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-4 sm:p-6 shrink-0 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
+                    <button 
+                      onClick={() => {
+                         setIsAddingHomework(true);
+                         setHomeworkSubject('');
+                         setHomeworkTask('');
+                         const d = new Date();
+                         d.setDate(d.getDate() + 1);
+                         setHomeworkDate(d.toISOString().split('T')[0]);
+                      }}
+                      className="w-full max-w-2xl mx-auto block bg-primary text-white font-bold py-4 rounded-2xl shadow-xl shadow-primary/20 active:scale-[0.98] transition-all cursor-pointer"
+                    >
+                      Neue Hausaufgabe
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="flex-1 flex flex-col p-4 sm:p-6 max-w-2xl w-full mx-auto pb-[calc(env(safe-area-inset-bottom)+1rem)]">
+                  <div className="space-y-8 flex-1 overflow-y-auto hide-scrollbar">
+                    
+                    <div>
+                      <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-3 uppercase tracking-wider">Fach auswählen</label>
+                      <div className="flex flex-wrap gap-2">
+                        {getAvailableSubjects(profile).map(subj => (
+                          <button
+                            key={subj}
+                            onClick={() => setHomeworkSubject(subj)}
+                            className={`px-4 py-2 rounded-xl text-sm font-bold transition-all border ${homeworkSubject === subj ? 'bg-primary text-white border-primary shadow-md' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-primary/50'}`}
+                          >
+                            {subj}
+                          </button>
+                        ))}
+                      </div>
+                      {!getAvailableSubjects(profile).includes(homeworkSubject) && (
+                        <input 
+                          type="text" 
+                          value={homeworkSubject}
+                          onChange={(e) => setHomeworkSubject(e.target.value)}
+                          placeholder="Anderes Fach..."
+                          className="mt-3 w-full p-4 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none focus:ring-2 focus:ring-primary text-slate-900 dark:text-white transition-all shadow-sm"
+                        />
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-3 uppercase tracking-wider">Aufgabe (Optional)</label>
+                      <input 
+                        type="text" 
+                        value={homeworkTask}
+                        onChange={(e) => setHomeworkTask(e.target.value)}
+                        placeholder="z.B. S. 42 Nr. 3 oder Vokabeln..."
+                        className="w-full p-4 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none focus:ring-2 focus:ring-primary text-slate-900 dark:text-white transition-all shadow-sm"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-3 uppercase tracking-wider">Bis wann?</label>
+                      <div className="flex overflow-x-auto pb-4 gap-3 hide-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
+                        {Array.from({length: 14}).map((_, i) => {
+                           const d = new Date();
+                           d.setDate(d.getDate() + i + 1);
+                           const dateString = d.toISOString().split('T')[0];
+                           const isSelected = homeworkDate === dateString;
+                           
+                           let label = d.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' });
+                           if (i === 0) label = 'Morgen';
+                           
+                           return (
+                             <button
+                               key={dateString}
+                               onClick={() => setHomeworkDate(dateString)}
+                               className={`flex-shrink-0 flex flex-col items-center justify-center py-3 px-5 rounded-2xl border-2 transition-all cursor-pointer ${isSelected ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}
+                             >
+                               <span className="font-bold whitespace-nowrap">{label}</span>
+                             </button>
+                           );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="flex gap-3 shrink-0 pt-4 mt-auto">
+                    <button 
+                      onClick={() => setIsAddingHomework(false)}
+                      className="flex-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold py-4 rounded-2xl active:scale-[0.98] transition-all cursor-pointer shadow-sm"
+                    >
+                      Abbrechen
+                    </button>
+                    <button 
+                      onClick={() => {
+                        if (homeworkSubject.trim() && homeworkDate) {
+                          setProfile(prev => ({
+                            ...prev,
+                            homework: [
+                              ...(prev.homework || []),
+                              {
+                                id: Math.random().toString(36).substr(2, 9),
+                                subject: homeworkSubject.trim(),
+                                task: homeworkTask.trim(),
+                                dueDate: new Date(homeworkDate).getTime(),
+                                createdAt: Date.now(),
+                                completed: false
+                              }
+                            ]
+                          }));
+                          setIsAddingHomework(false);
+                        }
+                      }}
+                      disabled={!homeworkSubject.trim() || !homeworkDate}
+                      className="flex-[2] bg-primary text-white font-bold py-4 rounded-2xl shadow-xl shadow-primary/20 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      Hinzufügen
+                    </button>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+
+        {isCalendarOpen && (
+          <div key="modal-calendar" className="fixed inset-0 z-50 flex flex-col bg-slate-50 dark:bg-slate-900">
+            <motion.div 
+              initial={{ opacity: 0, y: 50 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 50 }}
+              className="absolute inset-0 flex flex-col pt-safe pb-safe"
+            >
+              <div className="flex items-center justify-between p-4 sm:p-6 border-b border-slate-200 dark:border-slate-800 shrink-0 bg-white dark:bg-slate-900 z-10 shadow-sm">
+                 <div className="flex items-center gap-3">
+                   {selectedCalendarDate && (
+                     <button onClick={() => setSelectedCalendarDate(null)} className="p-2 -ml-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full cursor-pointer transition-colors">
+                       <ChevronRight className="w-6 h-6 text-slate-400 rotate-180" />
+                     </button>
+                   )}
+                   <h2 className="text-xl sm:text-2xl font-display font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                     <Calendar className="w-6 h-6 text-indigo-500" />
+                     {selectedCalendarDate ? selectedCalendarDate.toLocaleDateString() : 'Kalender'}
+                   </h2>
+                 </div>
+                 <button onClick={() => { setIsCalendarOpen(false); setSelectedCalendarDate(null); }} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full cursor-pointer transition-colors">
+                   <X className="w-6 h-6 text-slate-400" />
+                 </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6 max-w-4xl mx-auto w-full">
+                {!selectedCalendarDate ? (
+                   <div>
+                      <div className="flex justify-between items-center mb-6">
+                        <button onClick={() => {
+                          const newer = new Date(calendarDate);
+                          newer.setMonth(newer.getMonth() - 1);
+                          setCalendarDate(newer);
+                        }} className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-full">
+                           <ChevronLeft className="w-5 h-5" />
+                        </button>
+                        <span className="font-bold text-lg dark:text-white">
+                          {calendarDate.toLocaleString('default', { month: 'long', year: 'numeric' })}
+                        </span>
+                        <button onClick={() => {
+                          const newer = new Date(calendarDate);
+                          newer.setMonth(newer.getMonth() + 1);
+                          setCalendarDate(newer);
+                        }} className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-full">
+                           <ChevronRight className="w-5 h-5" />
+                        </button>
+                      </div>
+                      
+                      <div className="grid grid-cols-7 gap-1 sm:gap-2 mb-2">
+                        {['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map(d => (
+                          <div key={d} className="text-center font-bold text-slate-400 text-sm py-2">{d}</div>
+                        ))}
+                        {(() => {
+                          const daysInMonth = new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 1, 0).getDate();
+                          const firstDay = new Date(calendarDate.getFullYear(), calendarDate.getMonth(), 1).getDay();
+                          const shift = firstDay === 0 ? 6 : firstDay - 1;
+                          
+                          const cells = [];
+                          for (let i = 0; i < shift; i++) {
+                            cells.push(<div key={`empty-${i}`} className="p-2" />);
+                          }
+                          for (let i = 1; i <= daysInMonth; i++) {
+                            const dateObj = new Date(calendarDate.getFullYear(), calendarDate.getMonth(), i);
+                            const tstamp = dateObj.setHours(0,0,0,0);
+                            const isToday = new Date().setHours(0,0,0,0) === tstamp;
+                            
+                            const dayEvents = (profile.calendarEvents || []).filter(e => new Date(e.date).setHours(0,0,0,0) === tstamp);
+                            
+                            cells.push(
+                              <button 
+                                key={`day-${i}`}
+                                onClick={() => {
+                                   setSelectedCalendarDate(dateObj);
+                                   setIsAddingEvent(false);
+                                }}
+                                className={`aspect-square p-1 sm:p-2 rounded-xl flex flex-col items-center border ${isToday ? 'border-primary outline-primary outline-2 bg-primary/10' : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700'} relative`}
+                              >
+                                <span className={`text-sm sm:text-base font-bold ${isToday ? 'text-primary' : 'text-slate-700 dark:text-slate-300'}`}>{i}</span>
+                                {dayEvents.length > 0 && (
+                                  <div className="mt-1 flex gap-0.5 max-w-full flex-wrap justify-center overflow-hidden">
+                                    {dayEvents.slice(0, 3).map((e, idx) => (
+                                      <div key={idx} className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${e.type === 'exam' ? 'bg-danger' : 'bg-indigo-500'}`} />
+                                    ))}
+                                    {dayEvents.length > 3 && <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-slate-400" />}
+                                  </div>
+                                )}
+                              </button>
+                            );
+                          }
+                          return cells;
+                        })()}
+                      </div>
+                   </div>
+                ) : (
+                   <div className="space-y-6">
+                      {/* Day Subjects */}
+                      <div>
+                        <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-3 uppercase tracking-wider text-sm flex items-center gap-2">
+                           <BookOpen className="w-4 h-4 text-slate-400" />
+                           Fächer an diesem Tag
+                        </h3>
+                        {(() => {
+                           const dayOfWeek = selectedCalendarDate.getDay();
+                           // 0 = Sunday, 1 = Monday. We mapped schedule as 0 = Mon, 4 = Fri.
+                           // Skip weekend.
+                           if (dayOfWeek === 0 || dayOfWeek === 6) {
+                             return <div className="text-slate-500 bg-slate-100 dark:bg-slate-800/50 p-4 rounded-xl">Wochenende!</div>;
+                           }
+                           const scheduleDay = dayOfWeek - 1;
+                           const slots = profile.schedule[scheduleDay] || [];
+                           if (slots.length === 0) return <div className="text-slate-500 bg-slate-100 dark:bg-slate-800/50 p-4 rounded-xl">Kein Stundenplan eingetragen.</div>;
+                           
+                           return (
+                             <div className="flex flex-wrap gap-2">
+                               {slots.map((s, idx) => (
+                                 <span key={idx} className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-3 py-1.5 rounded-lg text-sm font-bold border border-slate-200 dark:border-slate-700">
+                                   {s.subject}
+                                 </span>
+                               ))}
+                             </div>
+                           );
+                        })()}
+                      </div>
+                      
+                      {/* Day Events */}
+                      <div>
+                        <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-3 uppercase tracking-wider text-sm flex items-center gap-2">
+                           <ListTodo className="w-4 h-4 text-slate-400" />
+                           Einträge
+                        </h3>
+                        {(() => {
+                           const tstamp = selectedCalendarDate.setHours(0,0,0,0);
+                           const dayEvents = (profile.calendarEvents || []).filter(e => new Date(e.date).setHours(0,0,0,0) === tstamp);
+                           if (dayEvents.length === 0) return <div className="text-slate-500 bg-slate-100 dark:bg-slate-800/50 p-4 rounded-xl text-sm italic">Keine Arbeiten oder Termine eingetragen.</div>;
+                           
+                           return (
+                             <div className="space-y-3">
+                               {dayEvents.map(e => (
+                                 <div key={e.id} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-4 rounded-xl shadow-sm flex items-start justify-between">
+                                    <div>
+                                      <div className="flex items-center gap-2 mb-1">
+                                        <span className={`text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full ${e.type === 'exam' ? 'bg-danger/10 text-danger' : 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400'}`}>
+                                          {e.type === 'exam' ? 'Arbeit/Test' : 'Termin'}
+                                        </span>
+                                      </div>
+                                      <span className="font-bold text-slate-900 dark:text-white">{e.title}</span>
+                                      {e.reminderDate && (
+                                        <div className="text-xs text-slate-500 mt-1 flex items-center gap-1">
+                                          <Bell className="w-3 h-3" /> Erinnerung am {new Date(e.reminderDate).toLocaleDateString()}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <button onClick={() => {
+                                       setProfile(p => ({
+                                          ...p,
+                                          calendarEvents: (p.calendarEvents || []).filter(ev => ev.id !== e.id)
+                                       }));
+                                    }} className="p-2 hover:bg-danger/10 text-slate-400 hover:text-danger rounded-lg transition-colors">
+                                       <Trash2 className="w-4 h-4" />
+                                    </button>
+                                 </div>
+                               ))}
+                             </div>
+                           );
+                        })()}
+                      </div>
+                      
+                      {/* Add Event Form */}
+                      {!isAddingEvent ? (
+                        <button onClick={() => setIsAddingEvent(true)} className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 py-4 rounded-2xl font-bold hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                          <Plus className="w-5 h-5" /> Eintrag hinzufügen
+                        </button>
+                      ) : (
+                        <div className="bg-slate-50 dark:bg-slate-800/50 p-4 sm:p-5 rounded-2xl border border-slate-200 dark:border-slate-700">
+                          <h4 className="font-bold text-slate-900 dark:text-white mb-4">Neuer Eintrag</h4>
+                          
+                          <div className="space-y-4">
+                            <div>
+                              <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Titel / Fach</label>
+                              <input 
+                                type="text"
+                                value={newEventTitle}
+                                onChange={e => setNewEventTitle(e.target.value)}
+                                placeholder="z.B. Klassenarbeit Mathe"
+                                className="w-full bg-white dark:bg-slate-800 dark:text-white rounded-xl px-4 py-3 font-semibold placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-primary border border-slate-200 dark:border-slate-700"
+                              />
+                            </div>
+                            
+                            <div>
+                              <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Typ</label>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => setNewEventType('exam')}
+                                  className={`flex-1 py-2 rounded-xl font-bold text-sm transition-colors border ${newEventType === 'exam' ? 'bg-danger text-white border-danger' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'} `}
+                                >
+                                  Klassenarbeit
+                                </button>
+                                <button
+                                  onClick={() => setNewEventType('term')}
+                                  className={`flex-1 py-2 rounded-xl font-bold text-sm transition-colors border ${newEventType === 'term' ? 'bg-indigo-500 text-white border-indigo-500' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'} `}
+                                >
+                                  Sonstiges
+                                </button>
+                              </div>
+                            </div>
+                            
+                            <div>
+                              <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Erinnere mich am ... (Optional)</label>
+                              <input 
+                                type="date"
+                                onChange={e => {
+                                  if (e.target.value) {
+                                     setNewEventReminder(new Date(e.target.value).setHours(0,0,0,0));
+                                  } else {
+                                     setNewEventReminder(null);
+                                  }
+                                }}
+                                className="w-full bg-white dark:bg-slate-800 dark:text-white rounded-xl px-4 py-3 font-semibold placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-primary border border-slate-200 dark:border-slate-700"
+                              />
+                            </div>
+                            
+                            <div className="flex gap-3 pt-2">
+                              <button onClick={() => { setIsAddingEvent(false); setNewEventTitle(''); setNewEventReminder(null); }} className="flex-1 py-3 text-slate-500 font-bold hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors">
+                                Abbrechen
+                              </button>
+                              <button 
+                                onClick={() => {
+                                  if (!newEventTitle.trim()) return;
+                                  setProfile(p => ({
+                                     ...p,
+                                     calendarEvents: [
+                                        ...(p.calendarEvents || []),
+                                        {
+                                          id: Math.random().toString(36).substr(2, 9),
+                                          date: selectedCalendarDate.setHours(0,0,0,0),
+                                          title: newEventTitle.trim(),
+                                          type: newEventType,
+                                          reminderDate: newEventReminder || undefined
+                                        }
+                                     ]
+                                  }));
+                                  setNewEventTitle('');
+                                  setNewEventReminder(null);
+                                  setIsAddingEvent(false);
+                                }}
+                                disabled={!newEventTitle.trim()}
+                                className="flex-1 py-3 bg-primary text-white font-bold rounded-xl shadow-lg shadow-primary/20 active:scale-95 disabled:opacity-50 transition-all"
+                              >
+                                Speichern
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                   </div>
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {isSocialOpen && (
+          <div key="modal-social" className="fixed inset-0 z-50 flex flex-col bg-black">
+            {/* Header */}
+            <div className={`absolute top-0 inset-x-0 p-4 z-20 flex justify-between items-center bg-gradient-to-b from-black/60 to-transparent pt-safe pointer-events-none ${socialView !== 'fyp' ? 'bg-slate-900 pointer-events-auto shadow-md' : ''}`}>
+              <div className="text-white font-bold text-lg flex items-center gap-2 pointer-events-auto">
+                 <Smartphone className="w-5 h-5"/> FYP
+                 <span className="text-[10px] uppercase tracking-wider font-bold bg-pink-500 text-white px-2 py-0.5 rounded-full">Beta</span>
+              </div>
+              <button onClick={() => setIsSocialOpen(false)} className="p-2 rounded-full hover:bg-white/20 transition pointer-events-auto">
+                <X className="text-white w-6 h-6" />
+              </button>
+            </div>
+            
+            <div className="flex-1 relative">
+              {socialView === 'fyp' && (
+                <div className="absolute inset-0 overflow-y-scroll snap-y snap-mandatory hide-scrollbar">
+                  {[...userSocialPosts, ...SOCIAL_POSTS].map((post) => (
+                    <div key={post.id} className="min-h-[100dvh] h-[100dvh] w-full snap-start relative flex flex-col overflow-hidden">
+                        <div className="absolute inset-0 bg-gradient-to-b from-indigo-900/20 via-purple-900/20 to-black/80 pointer-events-none"></div>
+                        {post.mediaUrl && post.mediaType === 'image' && (
+                           <img src={post.mediaUrl} className="absolute inset-0 w-full h-full object-cover opacity-60" alt="" />
+                        )}
+                        {post.mediaUrl && post.mediaType === 'video' && (
+                           <video src={post.mediaUrl} autoPlay loop muted playsInline className="absolute inset-0 w-full h-full object-cover opacity-60" />
+                        )}
+                        <div className="relative z-10 flex-1 flex items-center justify-center p-6 sm:p-12 pb-40 pr-24">
+                          {post.content && (
+                            <div className="text-2xl sm:text-4xl md:text-5xl font-display font-medium text-white max-w-3xl leading-snug w-full text-center md:text-left drop-shadow-md">
+                              {post.content}
+                            </div>
+                          )}
+                        </div>
+                        
+                        <div className="absolute bottom-20 right-4 sm:right-6 flex flex-col items-center gap-6 z-20 pb-safe">
+                          <button className="flex flex-col items-center gap-1 group" onClick={(e) => {
+                              const el = e.currentTarget.querySelector('svg');
+                              if(el) { el.classList.remove('text-white'); el.classList.add('text-pink-500', 'fill-pink-500'); }
+                          }}>
+                            <div className="p-2 rounded-full group-hover:bg-white/10 transition-colors">
+                              <Heart className="w-8 sm:w-10 h-8 sm:h-10 text-white transition-colors drop-shadow-md" />
+                            </div>
+                            <span className="text-white text-xs font-bold drop-shadow-md">
+                              {post.likes > 1000 ? (post.likes/1000).toFixed(1) + 'k' : post.likes}
+                            </span>
+                          </button>
+                          <button className="flex flex-col items-center gap-1 group">
+                            <div className="p-2 rounded-full group-hover:bg-white/10 transition-colors">
+                              <MessageCircle className="w-8 sm:w-10 h-8 sm:h-10 text-white drop-shadow-md" />
+                            </div>
+                            <span className="text-white text-xs font-bold drop-shadow-md">{post.comments}</span>
+                          </button>
+                          <button className="flex flex-col items-center gap-1 group">
+                            <div className="p-2 rounded-full group-hover:bg-white/10 transition-colors">
+                              <Share2 className="w-8 sm:w-10 h-8 sm:h-10 text-white drop-shadow-md" />
+                            </div>
+                            <span className="text-white text-xs font-bold drop-shadow-md">Teilen</span>
+                          </button>
+                        </div>
+                        
+                        <div className="absolute bottom-20 left-4 sm:left-6 right-24 text-left z-20 pb-safe">
+                          <div className="font-bold text-white text-lg sm:text-xl flex items-center gap-2 drop-shadow-md">
+                            {post.author} 
+                            <Check className="w-4 h-4 text-white bg-blue-500 rounded-full p-0.5 drop-shadow-md" />
+                          </div>
+                          <div className="text-white/80 text-sm mt-2 flex gap-2 overflow-x-hidden whitespace-nowrap drop-shadow-md">
+                            <span className="font-bold">#school</span> <span className="font-bold">#relatable</span> <span className="font-bold">#fyp</span>
+                          </div>
+                        </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {socialView === 'create' && (
+                 <div className="absolute inset-0 bg-slate-900 pt-24 px-6 flex flex-col pb-safe overflow-y-auto">
+                   <h2 className="text-white text-xl font-bold mb-4">Post erstellen</h2>
+                   <textarea
+                     className="w-full bg-slate-800 text-white rounded-xl p-4 min-h-[120px] resize-none focus:outline-none focus:ring-2 focus:ring-pink-500 mb-4"
+                     placeholder="Was möchtest du teilen?"
+                     value={createPostContent}
+                     onChange={(e) => setCreatePostContent(e.target.value)}
+                   />
+                   
+                   <label className="w-full mb-6 border-2 border-dashed border-slate-700 hover:border-pink-500 rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer transition-colors text-slate-400 hover:text-pink-400">
+                     <ImagePlus className="w-8 h-8 mb-2" />
+                     <span className="font-medium text-sm">Foto oder Video hinzufügen (Optional)</span>
+                     <input type="file" accept="image/*,video/*" className="hidden" onChange={(e) => {
+                       const file = e.target.files?.[0];
+                       if (file) {
+                         const reader = new FileReader();
+                         reader.onloadend = () => {
+                           setCreatePostMediaUrl(reader.result as string);
+                           setCreatePostMediaType(file.type.startsWith('video/') ? 'video' : 'image');
+                         };
+                         reader.readAsDataURL(file);
+                       }
+                     }} />
+                   </label>
+                   
+                   {createPostMediaUrl && createPostMediaType === 'image' && (
+                     <div className="relative w-full h-48 mb-6 rounded-xl overflow-hidden bg-black flex items-center justify-center">
+                       <img src={createPostMediaUrl} className="max-w-full max-h-full object-contain" alt="Preview"/>
+                       <button onClick={() => setCreatePostMediaUrl(null)} className="absolute top-2 right-2 p-2 bg-black/70 hover:bg-black/90 rounded-full text-white">
+                         <X className="w-4 h-4" />
+                       </button>
+                     </div>
+                   )}
+                   
+                   {createPostMediaUrl && createPostMediaType === 'video' && (
+                     <div className="relative w-full h-48 mb-6 rounded-xl overflow-hidden bg-black flex items-center justify-center">
+                       <video src={createPostMediaUrl} controls playsInline className="max-w-full max-h-full" />
+                       <button onClick={() => setCreatePostMediaUrl(null)} className="absolute top-2 right-2 p-2 bg-black/70 hover:bg-black/90 rounded-full text-white z-10">
+                         <X className="w-4 h-4" />
+                       </button>
+                     </div>
+                   )}
+                   
+                   <div className="mt-auto pt-4 pb-20">
+                     <button 
+                       onClick={() => {
+                          const likes = Math.floor(Math.random() * 1000) + 10;
+                          const comments = Math.floor(Math.random() * 100) + 1;
+                          const newFollowers = Math.floor(Math.random() * 200) + 20;
+                          
+                          const newPost = {
+                            id: `user_${Date.now()}`,
+                            author: `@${profile.name || 'User'}`,
+                            content: createPostContent,
+                            likes,
+                            comments,
+                            mediaUrl: createPostMediaUrl || undefined,
+                            mediaType: (createPostMediaType as 'image' | 'video') || undefined
+                          };
+                          setUserSocialPosts([newPost, ...userSocialPosts]);
+                          setSocialFollowers(prev => prev + newFollowers);
+                          triggerCelebration("Post Online!", `Du hast ${newFollowers} neue Follower!`);
+                          setCreatePostContent('');
+                          setCreatePostMediaUrl(null);
+                          setCreatePostMediaType(null);
+                          setSocialView('profile');
+                       }}
+                       disabled={!createPostContent.trim() && !createPostMediaUrl}
+                       className="w-full py-4 bg-pink-600 hover:bg-pink-500 text-white font-bold rounded-xl disabled:opacity-50 disabled:hover:bg-pink-600 transition-colors shadow-lg shadow-pink-600/30"
+                     >
+                       Posten
+                     </button>
+                   </div>
+                 </div>
+              )}
+
+              {socialView === 'profile' && (
+                 <div className="absolute inset-0 bg-slate-900 pt-24 px-6 flex flex-col items-center pb-safe overflow-y-auto">
+                   <div className="w-24 h-24 bg-gradient-to-tr from-pink-500 to-purple-500 rounded-full flex items-center justify-center text-3xl text-white font-bold mb-4 shadow-lg shadow-pink-500/20 border-4 border-slate-800">
+                     {(profile.name || 'User').substring(0,2).toUpperCase()}
+                   </div>
+                   <h2 className="text-white text-xl font-bold flex items-center gap-1.5">
+                     @{profile.name || 'User'} <Check className="w-4 h-4 text-white bg-blue-500 rounded-full p-0.5" />
+                   </h2>
+                   
+                   <div className="flex gap-8 mt-6 w-full max-w-[280px]">
+                     <div className="flex-1 flex flex-col items-center">
+                       <span className="text-white font-bold text-lg">{userSocialPosts.length}</span>
+                       <span className="text-slate-400 text-xs mt-1">Posts</span>
+                     </div>
+                     <div className="flex-1 flex flex-col items-center">
+                       <span className="text-white font-bold text-lg">{socialFollowers}</span>
+                       <span className="text-slate-400 text-xs mt-1">Follower</span>
+                     </div>
+                     <div className="flex-1 flex flex-col items-center">
+                       <span className="text-white font-bold text-lg">
+                         {userSocialPosts.reduce((sum, p) => sum + p.likes, 0)}
+                       </span>
+                       <span className="text-slate-400 text-xs mt-1">Likes</span>
+                     </div>
+                   </div>
+                   
+                   <div className="w-full mt-8 pb-20">
+                     <div className="flex border-b border-slate-700/50 mb-4">
+                        <button 
+                          onClick={() => setSocialProfileTab('posts')}
+                          className={`flex-1 pb-3 text-sm font-bold transition-colors ${socialProfileTab === 'posts' ? 'border-b-2 border-white text-white' : 'text-slate-500 hover:text-white'}`}
+                        >Posts</button>
+                        <button 
+                          onClick={() => setSocialProfileTab('likes')}
+                          className={`flex-1 pb-3 text-sm font-bold transition-colors ${socialProfileTab === 'likes' ? 'border-b-2 border-white text-white' : 'text-slate-500 hover:text-white'}`}
+                        >Likes</button>
+                     </div>
+                     {socialProfileTab === 'posts' && (
+                       userSocialPosts.length === 0 ? (
+                         <div className="flex flex-col items-center justify-center py-12 text-center text-slate-500">
+                            <ImagePlus className="w-12 h-12 mb-3 opacity-20" />
+                            <p>Dein Profil ist noch leer.<br/>Erstelle deinen ersten Post!</p>
+                         </div>
+                       ) : (
+                         <div className="grid grid-cols-3 gap-1">
+                           {userSocialPosts.map(post => (
+                             <div key={post.id} onClick={() => setViewingSocialPost(post)} className="aspect-[3/4] bg-slate-800 relative overflow-hidden group cursor-pointer active:scale-95 transition-transform">
+                               {post.mediaUrl && post.mediaType === 'image' && <img src={post.mediaUrl} className="w-full h-full object-cover" />}
+                               {post.mediaUrl && post.mediaType === 'video' && <video src={post.mediaUrl} className="w-full h-full object-cover" />}
+                               <div className="absolute inset-0 bg-black/60 flex items-center justify-center p-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                                 <p className="text-white text-[10px] sm:text-xs font-bold text-center line-clamp-4 break-words px-1">{post.content}</p>
+                               </div>
+                               <div className="absolute bottom-1 left-1 flex items-center gap-1 drop-shadow-md">
+                                 <Heart className="w-3 h-3 text-white" />
+                                 <span className="text-white text-[10px] font-bold">{post.likes > 1000 ? (post.likes/1000).toFixed(1) + 'k' : post.likes}</span>
+                               </div>
+                             </div>
+                           ))}
+                         </div>
+                       )
+                     )}
+                     {socialProfileTab === 'likes' && (
+                       <div className="flex flex-col items-center justify-center py-12 text-center text-slate-500">
+                          <Heart className="w-12 h-12 mb-3 opacity-20" />
+                          <p>Deine gelikten Posts erscheinen hier.<br/>Bald verfügbar!</p>
+                       </div>
+                     )}
+                   </div>
+                 </div>
+              )}
+            </div>
+            
+            {/* Bottom Nav Bar */}
+            <div className="absolute bottom-0 inset-x-0 bg-black/90 backdrop-blur-md border-t border-white/10 pb-safe z-30">
+              <div className="flex justify-around items-center h-16">
+                <button 
+                  onClick={() => setSocialView('fyp')}
+                  className={`flex flex-col items-center flex-1 transition-colors ${socialView === 'fyp' ? 'text-white' : 'text-white/50 hover:text-white/80'}`}
+                >
+                  <Home className={`w-6 h-6 mb-1 ${socialView === 'fyp' ? 'fill-white' : ''}`} />
+                  <span className="text-[10px] font-bold">Home</span>
+                </button>
+                
+                <button 
+                  onClick={() => setSocialView('create')}
+                  className="flex items-center justify-center flex-1"
+                >
+                  <div className={`w-12 h-8 rounded-xl flex items-center justify-center transition-transform active:scale-95 border-2 ${socialView === 'create' ? 'bg-pink-500 text-white border-pink-500' : 'bg-transparent text-white border-white'}`}>
+                    <Plus className="w-5 h-5" />
+                  </div>
+                </button>
+                
+                <button 
+                  onClick={() => setSocialView('profile')}
+                  className={`flex flex-col items-center flex-1 transition-colors ${socialView === 'profile' ? 'text-white' : 'text-white/50 hover:text-white/80'}`}
+                >
+                  <UserIcon className={`w-6 h-6 mb-1 ${socialView === 'profile' ? 'fill-white' : ''}`} />
+                  <span className="text-[10px] font-bold">Profil</span>
+                </button>
+              </div>
+            </div>
+            {viewingSocialPost && (
+              <div className="absolute inset-0 z-50 bg-black flex flex-col">
+                <button onClick={() => setViewingSocialPost(null)} className="absolute top-safe pt-4 left-4 z-50 p-2 bg-black/50 hover:bg-black/80 rounded-full text-white">
+                  <ChevronLeft className="w-6 h-6" />
+                </button>
+                <div className="flex-1 relative flex flex-col overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-b from-indigo-900/20 via-purple-900/20 to-black/80 pointer-events-none z-0"></div>
+                    {viewingSocialPost.mediaUrl && viewingSocialPost.mediaType === 'image' && (
+                       <img src={viewingSocialPost.mediaUrl} className="absolute inset-0 w-full h-full object-cover opacity-60" alt="" />
+                    )}
+                    {viewingSocialPost.mediaUrl && viewingSocialPost.mediaType === 'video' && (
+                       <video src={viewingSocialPost.mediaUrl} autoPlay loop muted playsInline className="absolute inset-0 w-full h-full object-cover opacity-60" />
+                    )}
+                    <div className="relative z-10 flex-1 flex items-center justify-center p-6 sm:p-12 pb-40 pr-24 pointer-events-none">
+                      {viewingSocialPost.content && (
+                        <div className="text-2xl sm:text-4xl md:text-5xl font-display font-medium text-white max-w-3xl leading-snug w-full text-center md:text-left drop-shadow-md">
+                          {viewingSocialPost.content}
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="absolute bottom-20 right-4 sm:right-6 flex flex-col items-center gap-6 z-20 pb-safe">
+                      <button className="flex flex-col items-center gap-1 group" onClick={(e) => {
+                          const el = e.currentTarget.querySelector('svg');
+                          if(el) { el.classList.remove('text-white'); el.classList.add('text-pink-500', 'fill-pink-500'); }
+                      }}>
+                        <div className="p-2 rounded-full group-hover:bg-white/10 transition-colors">
+                          <Heart className="w-8 sm:w-10 h-8 sm:h-10 text-white transition-colors drop-shadow-md" />
+                        </div>
+                        <span className="text-white text-xs font-bold drop-shadow-md">
+                          {viewingSocialPost.likes > 1000 ? (viewingSocialPost.likes/1000).toFixed(1) + 'k' : viewingSocialPost.likes}
+                        </span>
+                      </button>
+                      <button className="flex flex-col items-center gap-1 group">
+                        <div className="p-2 rounded-full group-hover:bg-white/10 transition-colors">
+                          <MessageCircle className="w-8 sm:w-10 h-8 sm:h-10 text-white drop-shadow-md" />
+                        </div>
+                        <span className="text-white text-xs font-bold drop-shadow-md">{viewingSocialPost.comments}</span>
+                      </button>
+                      <button className="flex flex-col items-center gap-1 group">
+                        <div className="p-2 rounded-full group-hover:bg-white/10 transition-colors">
+                          <Share2 className="w-8 sm:w-10 h-8 sm:h-10 text-white drop-shadow-md" />
+                        </div>
+                        <span className="text-white text-xs font-bold drop-shadow-md">Teilen</span>
+                      </button>
+                    </div>
+                    
+                    <div className="absolute bottom-20 left-4 sm:left-6 right-24 text-left z-20 pb-safe">
+                      <div className="font-bold text-white text-lg sm:text-xl flex items-center gap-2 drop-shadow-md">
+                        {viewingSocialPost.author} 
+                        <Check className="w-4 h-4 text-white bg-blue-500 rounded-full p-0.5 drop-shadow-md" />
+                      </div>
+                      <div className="text-white/80 text-sm mt-2 flex gap-2 overflow-x-hidden whitespace-nowrap drop-shadow-md">
+                        <span className="font-bold">#school</span> <span className="font-bold">#relatable</span> <span className="font-bold">#fyp</span>
+                      </div>
+                    </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {isQuizVsOpen && (
+          <div key="modal-quiz-vs" className="fixed inset-0 z-50 flex flex-col bg-slate-50 dark:bg-slate-900">
+            <motion.div 
+              initial={{ opacity: 0, y: 50 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 50 }}
+              className="absolute inset-0 flex flex-col pt-safe pb-safe"
+            >
+              <div className="flex items-center justify-between p-4 sm:p-6 border-b border-slate-200 dark:border-slate-800 shrink-0 bg-white dark:bg-slate-900 z-10 shadow-sm">
+                 <div className="flex items-center gap-3">
+                   {quizVsView !== 'subject_select' && (
+                     <button onClick={() => {
+                        if (quizVsView === 'difficulty_select') setQuizVsView('subject_select');
+                        else if (quizVsView === 'play') { setQuizVsView('subject_select'); setQuizVsSession(null); }
+                     }} className="p-2 -ml-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full cursor-pointer transition-colors">
+                       <ChevronRight className="w-6 h-6 text-slate-400 rotate-180" />
+                     </button>
+                   )}
+                   <h2 className="text-xl sm:text-2xl font-display font-bold text-slate-900 dark:text-white flex items-center gap-3">
+                     <Swords className="w-6 h-6 text-indigo-500" />
+                     {(quizVsView === 'subject_select' || quizVsView === 'difficulty_select') ? 'Quiz Versus Mode' : `Quiz: ${quizVsSubject}`}
+                   </h2>
+                 </div>
+                 <button onClick={() => { setIsQuizVsOpen(false); setQuizVsSession(null); }} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full cursor-pointer transition-colors">
+                   <X className="w-6 h-6 text-slate-400" />
+                 </button>
+              </div>
+
+              {quizVsView === 'subject_select' && (
+                  <div className="flex-1 overflow-y-auto p-4 sm:p-6 pb-[env(safe-area-inset-bottom)] max-w-4xl mx-auto w-full">
+                     <div className="text-center mb-8 mt-4">
+                        <div className="w-20 h-20 bg-indigo-100 dark:bg-indigo-900/30 rounded-full flex items-center justify-center mx-auto mb-4 border-4 border-white dark:border-slate-800 shadow-xl shadow-indigo-500/10">
+                           <Swords className="w-10 h-10 text-indigo-500" />
+                        </div>
+                        <h3 className="text-2xl sm:text-3xl font-display font-bold text-slate-900 dark:text-white mb-2">Wähle ein Fach</h3>
+                        <p className="text-slate-500 max-w-sm mx-auto">Tritt gegen unsere klugen Bots an und sammle extra Punkte im Quiz Mode!</p>
+                     </div>
+
+                     <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden mb-8">
+                       <button 
+                         onClick={() => {
+                            setQuizVsSubject('Englisch');
+                            setQuizVsView('difficulty_select');
+                         }}
+                         className="w-full flex items-center p-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors border-b border-slate-200 dark:border-slate-700 last:border-0"
+                       >
+                         <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-xl flex items-center justify-center text-blue-600 dark:text-blue-400 mr-4 shrink-0">
+                           <Languages className="w-6 h-6" />
+                         </div>
+                         <div className="flex-1 text-left">
+                           <h4 className="font-bold text-slate-900 dark:text-white text-lg">Englisch</h4>
+                           <p className="text-sm text-slate-500">Grammatik & Vokabeln</p>
+                         </div>
+                         <ChevronRight className="w-5 h-5 text-slate-300" />
+                       </button>
+
+                       <button 
+                         onClick={() => {
+                            setQuizVsSubject('Mathe');
+                            setQuizVsView('difficulty_select');
+                         }}
+                         className="w-full flex items-center p-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors border-b border-slate-200 dark:border-slate-700"
+                       >
+                         <div className="w-12 h-12 bg-green-100 dark:bg-green-900/30 rounded-xl flex items-center justify-center text-green-600 dark:text-green-400 mr-4 shrink-0">
+                           <Trophy className="w-6 h-6" />
+                         </div>
+                         <div className="flex-1 text-left flex items-center gap-2">
+                           <div>
+                             <h4 className="font-bold text-slate-900 dark:text-white text-lg">Mathe</h4>
+                             <p className="text-sm text-slate-500">Kopfrechnen</p>
+                           </div>
+                         </div>
+                         <ChevronRight className="w-5 h-5 text-slate-300" />
+                       </button>
+
+                       <button 
+                         onClick={() => {
+                            setQuizVsSubject('Französisch');
+                            setQuizVsView('difficulty_select');
+                         }}
+                         className="w-full flex items-center p-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors border-b border-slate-200 dark:border-slate-700"
+                       >
+                         <div className="w-12 h-12 bg-purple-100 dark:bg-purple-900/30 rounded-xl flex items-center justify-center text-purple-600 dark:text-purple-400 mr-4 shrink-0">
+                           <BookOpen className="w-6 h-6" />
+                         </div>
+                         <div className="flex-1 text-left">
+                           <h4 className="font-bold text-slate-900 dark:text-white text-lg">Französisch</h4>
+                           <p className="text-sm text-slate-500">Grammatik & Wortschatz</p>
+                         </div>
+                         <ChevronRight className="w-5 h-5 text-slate-300" />
+                       </button>
+
+                       <button 
+                         onClick={() => {
+                            setQuizVsSubject('Deutsch');
+                            setQuizVsView('difficulty_select');
+                         }}
+                         className="w-full flex items-center p-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors border-b border-slate-200 dark:border-slate-700 last:border-0"
+                       >
+                         <div className="w-12 h-12 bg-orange-100 dark:bg-orange-900/10 rounded-xl flex items-center justify-center text-orange-600 dark:text-orange-400 mr-4 shrink-0">
+                           <BookOpen className="w-6 h-6" />
+                         </div>
+                         <div className="flex-1 text-left">
+                           <h4 className="font-bold text-slate-900 dark:text-white text-lg">Deutsch</h4>
+                           <p className="text-sm text-slate-500">Rechtschreibung & Stilmittel</p>
+                         </div>
+                         <ChevronRight className="w-5 h-5 text-slate-300" />
+                       </button>
+                     </div>
+                  </div>
+              )}
+
+              {quizVsView === 'difficulty_select' && (
+                  <div className="flex-1 overflow-y-auto p-4 sm:p-6 pb-[env(safe-area-inset-bottom)] max-w-lg mx-auto w-full">
+                     <div className="text-center mb-8 mt-4">
+                        <div className="w-20 h-20 bg-indigo-100 dark:bg-indigo-900/30 rounded-full flex items-center justify-center mx-auto mb-4 border-4 border-white dark:border-slate-800 shadow-xl shadow-indigo-500/10">
+                           <Ghost className="w-10 h-10 text-indigo-500" />
+                        </div>
+                        <h3 className="text-2xl sm:text-3xl font-display font-bold text-slate-900 dark:text-white mb-2">Schwierigkeit</h3>
+                        <p className="text-slate-500 max-w-sm mx-auto">Wie gut sind deine {quizVsSubject}-Skills?</p>
+                     </div>
+
+                     <div className="space-y-4">
+                        <button
+                          onClick={() => startQuizVsMatch('easy')}
+                          className="w-full bg-white dark:bg-slate-800 p-5 sm:p-6 rounded-2xl border-2 border-slate-200 dark:border-slate-700 shadow-sm flex items-center justify-between hover:border-green-500 dark:hover:border-green-500 transition-colors group"
+                        >
+                           <div className="text-left">
+                             <h4 className="font-bold text-slate-900 dark:text-white text-lg flex items-center gap-2">
+                               <span className="w-3 h-3 rounded-full bg-green-500"></span>
+                               Einfach
+                             </h4>
+                             <p className="text-sm text-slate-500 mt-1">Langsamer Bot (1 Punkt pro Frage)</p>
+                           </div>
+                           <ChevronRight className="w-6 h-6 text-slate-300 group-hover:text-green-500 transition-colors" />
+                        </button>
+                        
+                        <button
+                          onClick={() => startQuizVsMatch('medium')}
+                          className="w-full bg-white dark:bg-slate-800 p-5 sm:p-6 rounded-2xl border-2 border-slate-200 dark:border-slate-700 shadow-sm flex items-center justify-between hover:border-yellow-500 dark:hover:border-yellow-500 transition-colors group"
+                        >
+                           <div className="text-left">
+                             <h4 className="font-bold text-slate-900 dark:text-white text-lg flex items-center gap-2">
+                               <span className="w-3 h-3 rounded-full bg-yellow-500"></span>
+                               Mittel
+                             </h4>
+                             <p className="text-sm text-slate-500 mt-1">Normaler Bot (2 Punkte pro Frage)</p>
+                           </div>
+                           <ChevronRight className="w-6 h-6 text-slate-300 group-hover:text-yellow-500 transition-colors" />
+                        </button>
+
+                        <button
+                          onClick={() => startQuizVsMatch('hard')}
+                          className="w-full bg-white dark:bg-slate-800 p-5 sm:p-6 rounded-2xl border-2 border-slate-200 dark:border-slate-700 shadow-sm flex items-center justify-between hover:border-danger dark:hover:border-danger transition-colors group"
+                        >
+                           <div className="text-left">
+                             <h4 className="font-bold text-slate-900 dark:text-white text-lg flex items-center gap-2">
+                               <span className="w-3 h-3 rounded-full bg-danger"></span>
+                               Schwer
+                             </h4>
+                             <p className="text-sm text-slate-500 mt-1">Schneller Bot (4 Punkte pro Frage)</p>
+                           </div>
+                           <ChevronRight className="w-6 h-6 text-slate-300 group-hover:text-danger transition-colors" />
+                        </button>
+                     </div>
+                  </div>
+              )}
+
+              {quizVsView === 'play' && quizVsSession && (
+                 <div className="flex-1 overflow-hidden flex flex-col p-4 sm:p-6 max-w-4xl mx-auto w-full">
+                    {quizVsSession.gameStatus !== 'game_over' ? (
+                       <div className="flex-1 flex flex-col h-full">
+                          <div className="flex justify-between items-center mb-6 px-4 bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 shrink-0">
+                             <div className="flex flex-col items-center flex-1">
+                                <span className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center text-xl font-bold text-primary mb-1">
+                                  {quizVsSession.userScore}
+                                </span>
+                                <span className="text-xs font-bold text-slate-500 uppercase">Du</span>
+                             </div>
+
+                             <div className="px-4 text-center">
+                                <span className="text-2xl font-black text-slate-300 dark:text-slate-600 block">VS</span>
+                             </div>
+
+                             <div className="flex flex-col items-center flex-1">
+                                <div className="w-12 h-12 bg-danger/10 rounded-full flex items-center justify-center mb-1 relative">
+                                  <span className="text-xl font-bold text-danger">{quizVsSession.botScore}</span>
+                                  {quizVsSession.gameStatus === 'playing' && (
+                                    <div className="absolute -bottom-1 -right-1 w-4 h-4 text-xs animate-bounce">🤔</div>
+                                  )}
+                                </div>
+                                <span className="text-xs font-bold text-slate-500 uppercase">{quizVsSession.botName}</span>
+                             </div>
+                          </div>
+                          
+                          <div className="w-full bg-slate-200 dark:bg-slate-700 h-2 rounded-full mb-8 overflow-hidden shrink-0">
+                             <div 
+                               className="h-full bg-indigo-500 transition-all duration-300 rounded-full"
+                               style={{ width: `${(quizVsSession.currentIndex / quizVsSession.questions.length) * 100}%` }}
+                             />
+                          </div>
+
+                          <div className="flex-1 flex flex-col min-h-0">
+                            <div className="flex-1 bg-white dark:bg-slate-800 rounded-[2.5rem] border-2 border-slate-200 border-b-8 border-r-8 dark:border-slate-700 shadow-sm flex flex-col items-center justify-center p-6 sm:p-8 mb-6 overflow-y-auto">
+                              <span className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">Frage {quizVsSession.currentIndex + 1} / {quizVsSession.questions.length}</span>
+                              <h3 className="text-2xl sm:text-3xl lg:text-4xl font-display font-medium text-slate-900 dark:text-white text-center break-words leading-tight">
+                                {quizVsSession.questions[quizVsSession.currentIndex].question}
+                              </h3>
+
+                              {quizVsSession.gameStatus === 'question_finished' && (
+                                <motion.div 
+                                  initial={{ opacity: 0, scale: 0.8 }}
+                                  animate={{ opacity: 1, scale: 1 }}
+                                  className={`mt-8 px-6 py-3 rounded-xl font-bold text-lg ${quizVsSession.questionWinner === 'user' ? 'bg-success/20 text-success' : 'bg-danger/20 text-danger'}`}
+                                >
+                                  {quizVsSession.questionWinner === 'user' ? 'Richtig! Punkt für dich.' : `Zu langsam! ${quizVsSession.botName} hat gepunktet.`}
+                                </motion.div>
+                              )}
+                            </div>
+                            
+                            <div className="space-y-3 shrink-0 pb-4">
+                              {(() => {
+                                 // Shuffle options only once per question by sorting with a seeded logic or we just randomize on start Match. 
+                                 // Actually quizVsSession.questions has fixed options order, we should maybe shuffle options during start Quiz VS Match. Let's just use them as is, they are already fixed length. But we want random order. 
+                                 // Simple way: derive random order from current question id.
+                                 const currentQ = quizVsSession.questions[quizVsSession.currentIndex];
+                                 const qHash = currentQ.question.length + quizVsSession.difficulty.length;
+                                 let displayOptions = [...currentQ.options];
+                                 if (qHash % 2 === 0) displayOptions = displayOptions.reverse();
+                                 else if (qHash % 3 === 0) displayOptions = [displayOptions[1], displayOptions[2], displayOptions[0]];
+                                 
+                                 return displayOptions.map((opt, i) => {
+                                    const isSelectedIncorrect = quizVsSession.selectedOptions[opt];
+                                    const isCorrect = opt === currentQ.correctAnswer;
+                                    const showCorrect = quizVsSession.gameStatus === 'question_finished' && isCorrect;
+                                    const isWrongDisabled = quizVsSession.gameStatus === 'question_finished' && !isCorrect;
+                                    
+                                    let btnStyle = "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700";
+                                    
+                                    if (showCorrect) btnStyle = "bg-success text-white border-success ring-4 ring-success/20 scale-105 z-10 font-bold";
+                                    else if (isSelectedIncorrect) btnStyle = "bg-danger/10 border-danger text-danger opacity-50 cursor-not-allowed";
+                                    else if (isWrongDisabled) btnStyle = "bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-400 opacity-50 cursor-not-allowed";
+                                    
+                                    return (
+                                       <button
+                                         key={i}
+                                         onClick={() => handleQuizVsAnswer(opt)}
+                                         disabled={quizVsSession.gameStatus !== 'playing' || isSelectedIncorrect}
+                                         className={`w-full p-4 rounded-2xl border-2 shadow-sm transition-all text-lg font-bold text-center ${btnStyle} active:scale-[0.98] disabled:active:scale-100`}
+                                       >
+                                          {opt}
+                                       </button>
+                                    );
+                                 });
+                              })()}
+                            </div>
+                          </div>
+                       </div>
+                    ) : (
+                       <div className="flex-1 flex items-center justify-center h-full">
+                          <div className="bg-white dark:bg-slate-800 rounded-[2.5rem] p-8 sm:p-12 text-center shadow-xl border border-slate-200 dark:border-slate-700 max-w-md w-full relative overflow-hidden">
+                             <div className="absolute top-0 left-0 w-full h-32 bg-gradient-to-b from-primary/10 to-transparent"></div>
+                             
+                             {quizVsSession.userScore > quizVsSession.botScore ? (
+                                <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} className="w-24 h-24 bg-success/10 rounded-full flex flex-col items-center justify-center mx-auto mb-6 relative z-10 text-success border-4 border-white dark:border-slate-800 shadow-xl shadow-success/20">
+                                   <Trophy className="w-12 h-12" />
+                                </motion.div>
+                             ) : quizVsSession.userScore < quizVsSession.botScore ? (
+                                <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} className="w-24 h-24 bg-danger/10 rounded-full flex flex-col items-center justify-center mx-auto mb-6 relative z-10 text-danger border-4 border-white dark:border-slate-800 shadow-xl shadow-danger/20">
+                                   <Ghost className="w-12 h-12" />
+                                </motion.div>
+                             ) : (
+                                <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} className="w-24 h-24 bg-slate-100 dark:bg-slate-800 rounded-full flex flex-col items-center justify-center mx-auto mb-6 relative z-10 text-slate-500 border-4 border-white dark:border-slate-800 shadow-xl shadow-slate-500/20">
+                                   <Hand className="w-12 h-12" />
+                                </motion.div>
+                             )}
+
+                             <h3 className="text-3xl font-display font-bold text-slate-900 dark:text-white mb-2 relative z-10">
+                                {quizVsSession.userScore > quizVsSession.botScore ? 'Gewonnen!' : quizVsSession.userScore < quizVsSession.botScore ? 'Verloren' : 'Unentschieden'}
+                             </h3>
+                             <p className="text-slate-500 font-medium mb-8 relative z-10">
+                                {quizVsSession.userScore > quizVsSession.botScore 
+                                   ? `Du warst schneller als ${quizVsSession.botName}.` 
+                                   : quizVsSession.userScore < quizVsSession.botScore 
+                                     ? `${quizVsSession.botName} war diesmal schlauer.`
+                                     : `Ein starkes Kopf-an-Kopf Rennen.`}
+                             </p>
+
+                             <div className="flex justify-center gap-8 mb-8 relative z-10">
+                                <div className="text-center">
+                                   <div className={`text-4xl font-black ${quizVsSession.userScore > quizVsSession.botScore ? 'text-success' : 'text-slate-900 dark:text-white'}`}>{quizVsSession.userScore}</div>
+                                   <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Du</div>
+                                </div>
+                                <div className="text-3xl text-slate-300 font-black mt-1">:</div>
+                                <div className="text-center">
+                                   <div className={`text-4xl font-black ${quizVsSession.userScore < quizVsSession.botScore ? 'text-danger' : 'text-slate-900 dark:text-white'}`}>{quizVsSession.botScore}</div>
+                                   <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">{quizVsSession.botName}</div>
+                                </div>
+                             </div>
+
+                             <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl mb-8 relative z-10 border border-slate-100 dark:border-slate-700/50">
+                                <div className="flex justify-between items-center text-sm font-bold text-slate-500 uppercase tracking-wider mb-2">
+                                  <span>Schwierigkeit</span>
+                                  <span className={quizVsSession.difficulty === 'easy' ? 'text-green-500' : quizVsSession.difficulty === 'medium' ? 'text-yellow-500' : 'text-danger'}>
+                                    {quizVsSession.difficulty === 'easy' ? 'Einfach' : quizVsSession.difficulty === 'medium' ? 'Mittel' : 'Schwer'}
+                                  </span>
+                                </div>
+                                <div className="flex justify-between items-center">
+                                   <span className="font-bold text-slate-500 uppercase tracking-wider text-sm">Punkte verdient</span>
+                                   <span className="font-bold text-3xl font-display text-primary flex items-center gap-2">
+                                      +{quizVsSession.userScore * (quizVsSession.difficulty === 'easy' ? 1 : quizVsSession.difficulty === 'medium' ? 2 : 4)} <Target className="w-6 h-6"/>
+                                   </span>
+                                </div>
+                             </div>
+                             
+                             <button 
+                               onClick={() => {
+                                  const pointsMulti = quizVsSession.difficulty === 'easy' ? 1 : quizVsSession.difficulty === 'medium' ? 2 : 4;
+                                  const pointsGained = quizVsSession.userScore * pointsMulti;
+                                  if (pointsGained > 0) {
+                                      setProfile(prev => {
+                                         return {
+                                            ...prev,
+                                            points: prev.points + pointsGained,
+                                            history: [
+                                               {
+                                                 id: Math.random().toString(36).substr(2, 9),
+                                                 type: 'challenge',
+                                                 date: Date.now(),
+                                                 points: pointsGained,
+                                                 value: quizVsSession.userScore,
+                                                 comment: `Quiz VS Mode vs ${quizVsSession.botName} (${quizVsSession.userScore}/${quizVsSession.questions.length})`,
+                                               },
+                                               ...prev.history
+                                            ]
+                                         };
+                                      });
+                                      triggerCelebration("Quiz beendet!", `+${pointsGained} Punkte`);
+                                  }
+                                  setQuizVsView('subject_select');
+                                  setQuizVsSession(null);
+                               }}
+                               className="w-full bg-primary text-white font-bold py-5 rounded-2xl shadow-xl shadow-primary/20 active:scale-[0.98] transition-all text-lg cursor-pointer relative z-10"
+                             >
+                               Punkte einsammeln & schließen
+                             </button>
+                          </div>
+                       </div>
+                    )}
+                 </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+
+        {isVocabOpen && (
+          <div key="modal-vocab" className="fixed inset-0 z-50 flex flex-col bg-slate-50 dark:bg-slate-900">
+            <motion.div 
+              initial={{ opacity: 0, y: 50 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 50 }}
+              className="absolute inset-0 flex flex-col pt-safe pb-safe"
+            >
+              <div className="flex items-center justify-between p-4 sm:p-6 border-b border-slate-200 dark:border-slate-800 shrink-0 bg-white dark:bg-slate-900 z-10 shadow-sm">
+                 <div className="flex items-center gap-3">
+                   {vocabView !== 'lists' && (
+                     <button onClick={() => {
+                        if (vocabView === 'learn' || vocabView === 'versus_play' || vocabView === 'versus_setup') {
+                           setVocabView('lists');
+                           setLearnSession(null);
+                           setVersusSession(null);
+                        } else {
+                           setVocabView('lists');
+                        }
+                     }} className="p-2 -ml-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full cursor-pointer transition-colors">
+                       <ChevronRight className="w-6 h-6 text-slate-400 rotate-180" />
+                     </button>
+                   )}
+                   <h2 className="text-xl sm:text-2xl font-display font-bold text-slate-900 dark:text-white flex items-center gap-3">
+                     <Languages className="w-6 h-6 text-primary" />
+                     {vocabView === 'lists' ? 'Vokabeln' : vocabView === 'create_list' ? 'Neue Liste' : vocabView === 'edit_list' ? 'Liste bearbeiten' : vocabView === 'stats' ? 'Statistik' : vocabView === 'versus_setup' ? 'Versus Mode' : currentVocabList?.title}
+                   </h2>
+                 </div>
+                 <button onClick={() => { setIsVocabOpen(false); setLearnSession(null); setVersusSession(null); }} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full cursor-pointer transition-colors">
+                   <X className="w-6 h-6 text-slate-400" />
+                 </button>
+              </div>
+
+              {/* Lists View */}
+              {vocabView === 'lists' && (
+                  <div className="flex-1 overflow-y-auto p-4 sm:p-6 pb-[env(safe-area-inset-bottom)] max-w-4xl mx-auto w-full">
+                    <div className="flex justify-between items-center mb-6">
+                       <div className="flex items-center gap-3">
+                          <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200">Deine Listen</h3>
+                          <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-bold shadow-sm border ${(profile.vocabStreak || 0) > 0 ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 border-orange-200 dark:border-orange-800/50' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'}`}>
+                            <Flame className={`w-4 h-4 ${(profile.vocabStreak || 0) > 0 ? 'text-orange-500 text-orange-400' : 'opacity-50'}`} /> {profile.vocabStreak || 0} Tag{(profile.vocabStreak || 0) === 1 ? '' : 'e'}
+                          </div>
+                       </div>
+                       <button onClick={() => setVocabView('stats')} className="flex items-center gap-2 text-sm font-bold text-primary hover:text-primary/80 transition-colors">
+                         <BarChart3 className="w-4 h-4" /> Statistik
+                       </button>
+                    </div>
+
+                    {!(profile.vocabLists?.length) ? (
+                      <div className="flex flex-col items-center justify-center h-64 text-center">
+                        <Languages className="w-16 h-16 text-slate-300 dark:text-slate-700 mb-4" />
+                        <h3 className="text-lg font-bold text-slate-700 dark:text-slate-300">Noch keine Listen</h3>
+                        <p className="text-slate-500 max-w-sm mt-2">Erstelle deine erste Vokabelliste und verdiene Punkte beim Lernen!</p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {(profile.vocabLists || []).map(list => (
+                          <div key={list.id} className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col">
+                            <div className="flex justify-between items-start mb-2">
+                               <div>
+                                 <span className="text-xs font-bold text-primary uppercase tracking-wider mb-1 block">{list.subject}</span>
+                                 <h4 className="font-bold text-slate-900 dark:text-white text-lg">{list.title}</h4>
+                               </div>
+                               <div className="flex gap-2">
+                                   <button onClick={() => {
+                                      setCurrentVocabList(list);
+                                      setNewVocabListTitle(list.title);
+                                      setNewVocabListSubject(list.subject);
+                                      setNewVocabWords(list.words);
+                                      setVocabView('edit_list');
+                                   }} className="p-2 text-slate-400 hover:text-primary transition-colors">
+                                     <Settings className="w-5 h-5" />
+                                   </button>
+                                   <button onClick={() => {
+                                      if (confirm('Möchtest du diese Liste wirklich löschen?')) {
+                                          setProfile(prev => ({
+                                              ...prev,
+                                              vocabLists: (prev.vocabLists || []).filter(l => l.id !== list.id)
+                                          }));
+                                      }
+                                   }} className="p-2 text-slate-400 hover:text-danger transition-colors">
+                                     <Trash2 className="w-5 h-5" />
+                                   </button>
+                               </div>
+                            </div>
+                            <p className="text-sm text-slate-500 font-medium mb-6">{list.words.length} {list.words.length === 1 ? 'Wort' : 'Wörter'}</p>
+                            
+                            <div className="flex gap-2 mt-auto pt-4">
+                              <button 
+                                onClick={() => {
+                                   setCurrentVocabList(list);
+                                   setLearnSession({
+                                      listId: list.id,
+                                      words: [...list.words].sort(() => Math.random() - 0.5), // simple shuffle
+                                      currentIndex: 0,
+                                      flipped: false,
+                                      correct: 0,
+                                      wrong: 0
+                                   });
+                                   setVocabView('learn');
+                                }}
+                                disabled={list.words.length === 0}
+                                className="flex-1 bg-primary/10 text-primary hover:bg-primary hover:text-white font-bold py-3 rounded-xl transition-colors disabled:opacity-50 flex justify-center items-center gap-2 cursor-pointer"
+                              >
+                                <Brain className="w-5 h-5" />
+                                Lernen
+                              </button>
+                              <button 
+                                onClick={() => {
+                                   setCurrentVocabList(list);
+                                   setVocabView('versus_setup');
+                                }}
+                                disabled={list.words.length === 0}
+                                className="flex-1 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500 hover:text-white font-bold py-3 rounded-xl transition-colors disabled:opacity-50 flex justify-center items-center gap-2 cursor-pointer"
+                              >
+                                <Swords className="w-5 h-5" />
+                                Versus
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+              )}
+
+              {/* Lists View Footer */}
+              {vocabView === 'lists' && (
+                  <div className="p-4 sm:p-6 shrink-0 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
+                    <button 
+                      onClick={() => {
+                         setNewVocabListTitle('');
+                         setNewVocabListSubject(getAvailableSubjects(profile)[0] || '');
+                         setNewVocabWords([{front: '', back: ''}]);
+                         setVocabView('create_list');
+                      }}
+                      className="w-full max-w-4xl mx-auto flex items-center justify-center gap-2 bg-primary text-white font-bold py-4 rounded-2xl shadow-xl shadow-primary/20 active:scale-[0.98] transition-all cursor-pointer"
+                    >
+                      <Plus className="w-5 h-5" /> Neue Liste erstellen
+                    </button>
+                  </div>
+              )}
+
+              {/* Create / Edit List View */}
+              {(vocabView === 'create_list' || vocabView === 'edit_list') && (
+                  <div className="flex-1 overflow-y-auto p-4 sm:p-6 pb-[calc(env(safe-area-inset-bottom)+1rem)] max-w-2xl mx-auto w-full">
+                     <div className="space-y-6">
+                        <div>
+                          <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2 uppercase tracking-wider">Titel der Liste</label>
+                          <input 
+                            type="text" 
+                            value={newVocabListTitle}
+                            onChange={(e) => setNewVocabListTitle(e.target.value)}
+                            placeholder="z.B. Unit 1, Lektion 4..."
+                            className="w-full p-4 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none focus:ring-2 focus:ring-primary text-slate-900 dark:text-white transition-all shadow-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2 uppercase tracking-wider">Fach</label>
+                          <div className="flex flex-wrap gap-2">
+                             {getAvailableSubjects(profile).map(subj => (
+                                <button
+                                  key={subj}
+                                  onClick={() => setNewVocabListSubject(subj)}
+                                  className={`px-4 py-2 rounded-xl text-sm font-bold transition-all border ${newVocabListSubject === subj ? 'bg-primary text-white border-primary shadow-md' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-primary/50'}`}
+                                >
+                                  {subj}
+                                </button>
+                             ))}
+                          </div>
+                          {!getAvailableSubjects(profile).includes(newVocabListSubject) && (
+                            <input 
+                              type="text" 
+                              value={newVocabListSubject}
+                              onChange={(e) => setNewVocabListSubject(e.target.value)}
+                              placeholder="Anderes Fach..."
+                              className="mt-3 w-full p-4 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none focus:ring-2 focus:ring-primary text-slate-900 dark:text-white transition-all shadow-sm"
+                            />
+                          )}
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-4 uppercase tracking-wider">Wörter ({newVocabWords.length})</label>
+                          <div className="space-y-3">
+                             {newVocabWords.map((word, idx) => (
+                                <div key={idx} className="flex gap-2 items-center">
+                                   <span className="text-xs font-bold text-slate-400 w-6 text-center">{idx + 1}.</span>
+                                   <div className="flex-1 grid grid-cols-2 gap-2">
+                                     <input 
+                                       type="text" 
+                                       value={word.front}
+                                       placeholder="Wort"
+                                       onChange={(e) => {
+                                          const w = [...newVocabWords];
+                                          w[idx].front = e.target.value;
+                                          setNewVocabWords(w);
+                                       }}
+                                       className="w-full p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm outline-none focus:border-primary transition-colors text-slate-900 dark:text-white"
+                                     />
+                                     <input 
+                                       type="text" 
+                                       value={word.back}
+                                       placeholder="Übersetzung"
+                                       onChange={(e) => {
+                                          const w = [...newVocabWords];
+                                          w[idx].back = e.target.value;
+                                          setNewVocabWords(w);
+                                       }}
+                                       className="w-full p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm outline-none focus:border-primary transition-colors text-slate-900 dark:text-white"
+                                     />
+                                   </div>
+                                   <button onClick={() => {
+                                      const w = [...newVocabWords];
+                                      w.splice(idx, 1);
+                                      if (w.length === 0) w.push({front: '', back: ''});
+                                      setNewVocabWords(w);
+                                   }} className="p-2 text-danger hover:bg-danger/10 rounded-lg transition-colors cursor-pointer">
+                                     <Trash2 className="w-5 h-5" />
+                                   </button>
+                                </div>
+                             ))}
+                          </div>
+                          
+                          <button onClick={() => {
+                             setNewVocabWords([...newVocabWords, {front: '', back: ''}]);
+                          }} className="mt-4 flex items-center gap-2 text-sm font-bold text-primary hover:text-primary/80 transition-colors w-full p-4 bg-primary/5 rounded-xl justify-center border border-primary/20 hover:bg-primary/10 cursor-pointer">
+                            <Plus className="w-4 h-4" /> Weiteres Wort hinzufügen
+                          </button>
+                        </div>
+                     </div>
+                     <div className="mt-8">
+                       <button
+                         onClick={() => {
+                            if (!newVocabListTitle.trim() || !newVocabListSubject) return;
+                            const validWords = newVocabWords.filter(w => w.front.trim() && w.back.trim()).map(w => ({
+                               id: Math.random().toString(36).substr(2, 9),
+                               front: w.front.trim(),
+                               back: w.back.trim(),
+                               correctCount: 0,
+                               wrongCount: 0,
+                               ...(vocabView === 'edit_list' && currentVocabList?.words.find(cw => cw.front === w.front.trim()) 
+                                   ? currentVocabList.words.find(cw => cw.front === w.front.trim()) 
+                                   : {})
+                            })) as VocabWord[];
+                            
+                            if (validWords.length === 0) return;
+
+                            setProfile(prev => {
+                               const lists = [...(prev.vocabLists || [])];
+                               if (vocabView === 'create_list') {
+                                 lists.push({
+                                    id: Math.random().toString(36).substr(2, 9),
+                                    title: newVocabListTitle.trim(),
+                                    subject: newVocabListSubject,
+                                    words: validWords,
+                                    createdAt: Date.now()
+                                 });
+                               } else if (currentVocabList) {
+                                 const index = lists.findIndex(l => l.id === currentVocabList.id);
+                                 if (index !== -1) {
+                                    lists[index] = {
+                                       ...lists[index],
+                                       title: newVocabListTitle.trim(),
+                                       subject: newVocabListSubject,
+                                       words: validWords
+                                    };
+                                 }
+                               }
+                               return { ...prev, vocabLists: lists };
+                            });
+                            setVocabView('lists');
+                         }}
+                         disabled={!newVocabListTitle.trim() || !newVocabListSubject || !newVocabWords.some(w => w.front.trim() && w.back.trim())}
+                         className="w-full bg-primary text-white font-bold py-4 rounded-2xl shadow-xl shadow-primary/20 active:scale-[0.98] transition-all disabled:opacity-50 cursor-pointer"
+                       >
+                         {vocabView === 'create_list' ? 'Liste erstellen' : 'Änderungen speichern'}
+                       </button>
+                     </div>
+                  </div>
+              )}
+
+              {/* Learn View */}
+              {vocabView === 'learn' && learnSession && (
+                 <div className="flex-1 overflow-y-auto p-4 sm:p-6 pb-[calc(env(safe-area-inset-bottom)+1rem)] max-w-xl mx-auto w-full flex flex-col">
+                    {learnSession.currentIndex < learnSession.words.length ? (
+                       <>
+                         <div className="flex items-center justify-between mb-6">
+                            <span className="text-sm font-bold text-slate-500 uppercase tracking-wider">
+                              Wort {learnSession.currentIndex + 1} / {learnSession.words.length}
+                            </span>
+                            <div className="flex gap-4 text-base font-bold bg-white dark:bg-slate-800 px-4 py-2 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700">
+                               <span className="text-success flex items-center gap-1"><Check className="w-4 h-4"/> {learnSession.correct}</span>
+                               <span className="text-danger flex items-center gap-1"><X className="w-4 h-4"/> {learnSession.wrong}</span>
+                            </div>
+                         </div>
+                         
+                         <div className="w-full bg-slate-200 dark:bg-slate-700 h-2 rounded-full mb-8 overflow-hidden">
+                            <div 
+                              className="h-full bg-primary transition-all duration-300 rounded-full"
+                              style={{ width: `${(learnSession.currentIndex / learnSession.words.length) * 100}%` }}
+                            />
+                         </div>
+
+                         <div 
+                           className="flex-1 bg-white dark:bg-slate-800 rounded-[2.5rem] border-2 border-slate-200 border-b-8 border-r-8 dark:border-slate-700 shadow-sm flex flex-col items-center justify-center p-8 mb-8 min-h-[400px] cursor-pointer"
+                           onClick={() => setLearnSession({ ...learnSession, flipped: true })}
+                         >
+                           <h3 className="text-4xl sm:text-5xl font-display font-medium text-slate-900 dark:text-white text-center break-words">
+                             {learnSession.words[learnSession.currentIndex].front}
+                           </h3>
+                           
+                           {learnSession.flipped && (
+                             <motion.div 
+                               initial={{ opacity: 0, y: 20 }}
+                               animate={{ opacity: 1, y: 0 }}
+                               className="mt-12 pt-8 border-t-2 border-dashed border-slate-200 dark:border-slate-700 w-[80%] mx-auto text-center"
+                             >
+                                <h4 className="text-3xl sm:text-4xl font-display font-bold text-primary break-words">
+                                  {learnSession.words[learnSession.currentIndex].back}
+                                </h4>
+                             </motion.div>
+                           )}
+                           
+                           {!learnSession.flipped && (
+                             <p className="mt-auto pt-8 text-sm font-bold uppercase tracking-widest text-slate-400">Tippen zum Aufdecken</p>
+                           )}
+                         </div>
+
+                         {learnSession.flipped ? (
+                           <motion.div 
+                             initial={{ opacity: 0, y: 20 }}
+                             animate={{ opacity: 1, y: 0 }}
+                             className="flex gap-4 shrink-0"
+                           >
+                              <button 
+                                onClick={() => {
+                                   setLearnSession({
+                                      ...learnSession,
+                                      wrong: learnSession.wrong + 1,
+                                      currentIndex: learnSession.currentIndex + 1,
+                                      flipped: false
+                                   });
+                                }}
+                                className="flex-1 bg-white dark:bg-slate-800 text-danger border-2 border-slate-200 dark:border-slate-700 hover:border-danger hover:bg-danger/10 font-bold py-5 rounded-2xl active:scale-[0.98] transition-all text-lg shadow-sm cursor-pointer"
+                              >
+                                Nicht gewusst 😔
+                              </button>
+                              <button 
+                                onClick={() => {
+                                   setLearnSession({
+                                      ...learnSession,
+                                      correct: learnSession.correct + 1,
+                                      currentIndex: learnSession.currentIndex + 1,
+                                      flipped: false
+                                   });
+                                }}
+                                className="flex-1 bg-primary text-white font-bold py-5 rounded-2xl active:scale-[0.98] transition-all text-lg shadow-xl shadow-primary/20 cursor-pointer"
+                              >
+                                Gewusst! 🥳
+                              </button>
+                           </motion.div>
+                         ) : (
+                           <div className="h-[76px] shrink-0" />
+                         )}
+                       </>
+                    ) : (
+                       <div className="flex-1 flex flex-col items-center justify-center text-center">
+                          <Brain className="w-24 h-24 text-primary mb-6 animate-bounce" />
+                          <h2 className="text-4xl font-display font-bold text-slate-900 dark:text-white mb-2">Fertig!</h2>
+                          <p className="text-lg text-slate-600 dark:text-slate-300 mb-8 font-medium">Du hast {learnSession.correct} von {learnSession.words.length} Wörtern gewusst.</p>
+                          
+                          <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 border-2 border-slate-100 dark:border-slate-700 w-full mb-8 shadow-sm">
+                             <div className="flex justify-between items-center mb-6">
+                                <span className="font-bold text-slate-500 uppercase tracking-wider text-sm">Ergebnis</span>
+                                <span className="font-bold text-3xl font-display text-slate-900 dark:text-white">{Math.round((learnSession.correct / learnSession.words.length) * 100)}%</span>
+                             </div>
+                             <div className="flex justify-between items-center">
+                                <span className="font-bold text-slate-500 uppercase tracking-wider text-sm">Punkte verdient</span>
+                                <span className="font-bold text-3xl font-display text-primary flex items-center gap-2">+{learnSession.correct * 2} <Target className="w-6 h-6"/></span>
+                             </div>
+                          </div>
+                          
+                          <button 
+                            onClick={() => {
+                               const pointsGained = learnSession.correct * 2;
+                               if (pointsGained > 0) {
+                                   setProfile(prev => {
+                                      const todayStr = new Date().toLocaleDateString();
+                                      let newStreak = prev.vocabStreak || 0;
+                                      if (prev.lastVocabDate) {
+                                          const lastDate = new Date(prev.lastVocabDate);
+                                          if (lastDate.toLocaleDateString() !== todayStr) {
+                                              const diffDays = Math.round((new Date().setHours(0,0,0,0) - lastDate.setHours(0,0,0,0)) / (1000 * 60 * 60 * 24));
+                                              if (diffDays === 1) newStreak++;
+                                              else if (diffDays > 1) newStreak = 1;
+                                          }
+                                          if (newStreak === 0) newStreak = 1;
+                                      } else {
+                                          newStreak = 1;
+                                      }
+                                      return {
+                                         ...prev,
+                                         vocabStreak: newStreak,
+                                         lastVocabDate: Date.now(),
+                                         points: prev.points + pointsGained,
+                                         history: [
+                                            {
+                                              id: Math.random().toString(36).substr(2, 9),
+                                              type: 'vocab',
+                                              date: Date.now(),
+                                              points: pointsGained,
+                                              value: learnSession.correct,
+                                              comment: `Vokabeltest: ${currentVocabList?.title} (${learnSession.correct}/${learnSession.words.length})`,
+                                            },
+                                            ...prev.history
+                                         ]
+                                      };
+                                   });
+                                   triggerCelebration("Vokabeln gelernt!", `+${pointsGained} Punkte`);
+                               }
+                               setVocabView('lists');
+                               setLearnSession(null);
+                            }}
+                            className="w-full bg-primary text-white font-bold py-5 rounded-2xl shadow-xl shadow-primary/20 active:scale-[0.98] transition-all text-lg cursor-pointer cursor-pointer"
+                          >
+                            Punkte einsammeln & schließen
+                          </button>
+                       </div>
+                    )}
+                 </div>
+              )}
+
+              {/* Versus Setup View */}
+              {vocabView === 'versus_setup' && currentVocabList && (
+                 <div className="flex-1 overflow-y-auto p-4 sm:p-6 pb-[calc(env(safe-area-inset-bottom)+1rem)] max-w-xl mx-auto w-full flex flex-col items-center justify-center">
+                    <Ghost className="w-24 h-24 text-indigo-500 mb-6 drop-shadow-lg" />
+                    <h2 className="text-3xl font-display font-bold text-slate-900 dark:text-white mb-2">Multiplayer (Bot-Gegner)</h2>
+                    <p className="text-slate-600 dark:text-slate-300 text-center mb-8 max-w-sm">Tritt gegen einen KI-Gegner an! Wer zuerst die richtige Übersetzung eingibt, erhält den Punkt.</p>
+                    
+                    <div className="w-full space-y-4">
+                       <button 
+                         onClick={() => {
+                            setVersusSession({
+                               listId: currentVocabList.id,
+                               words: [...currentVocabList.words].sort(() => Math.random() - 0.5),
+                               currentIndex: 0,
+                               userScore: 0,
+                               botScore: 0,
+                               botName: BOT_NAMES[Math.floor(Math.random() * BOT_NAMES.length)],
+                               difficulty: 'easy',
+                               gameStatus: 'playing',
+                               wordWinner: null,
+                               currentInput: '',
+                               targetIsFront: Math.random() > 0.5
+                            });
+                            setVocabView('versus_play');
+                         }}
+                         className="w-full p-4 rounded-2xl border-2 border-green-200 dark:border-green-900/50 bg-green-50 dark:bg-green-900/10 hover:bg-green-100 dark:hover:bg-green-900/20 text-left transition-all cursor-pointer flex justify-between items-center group"
+                       >
+                         <div>
+                            <h4 className="font-bold text-green-700 dark:text-green-400 text-lg">Einfach</h4>
+                            <p className="text-sm text-green-600/80 dark:text-green-400/80 font-medium">10-15s Reaktionszeit • 1 Punkt pro Wort</p>
+                         </div>
+                         <div className="w-10 h-10 rounded-full bg-green-200 dark:bg-green-800 flex items-center justify-center group-hover:scale-110 transition-transform">
+                            <Gamepad2 className="w-5 h-5 text-green-700 dark:text-green-400" />
+                         </div>
+                       </button>
+                       <button 
+                         onClick={() => {
+                            setVersusSession({
+                               listId: currentVocabList.id,
+                               words: [...currentVocabList.words].sort(() => Math.random() - 0.5),
+                               currentIndex: 0,
+                               userScore: 0,
+                               botScore: 0,
+                               botName: BOT_NAMES[Math.floor(Math.random() * BOT_NAMES.length)],
+                               difficulty: 'medium',
+                               gameStatus: 'playing',
+                               wordWinner: null,
+                               currentInput: '',
+                               targetIsFront: Math.random() > 0.5
+                            });
+                            setVocabView('versus_play');
+                         }}
+                         className="w-full p-4 rounded-2xl border-2 border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-900/10 hover:bg-amber-100 dark:hover:bg-amber-900/20 text-left transition-all cursor-pointer flex justify-between items-center group"
+                       >
+                         <div>
+                            <h4 className="font-bold text-amber-700 dark:text-amber-400 text-lg">Mittel</h4>
+                            <p className="text-sm text-amber-600/80 dark:text-amber-400/80 font-medium">7-12s Reaktionszeit • 2 Punkte pro Wort</p>
+                         </div>
+                         <div className="w-10 h-10 rounded-full bg-amber-200 dark:bg-amber-800 flex items-center justify-center group-hover:scale-110 transition-transform">
+                            <Swords className="w-5 h-5 text-amber-700 dark:text-amber-400" />
+                         </div>
+                       </button>
+                       <button 
+                         onClick={() => {
+                            setVersusSession({
+                               listId: currentVocabList.id,
+                               words: [...currentVocabList.words].sort(() => Math.random() - 0.5),
+                               currentIndex: 0,
+                               userScore: 0,
+                               botScore: 0,
+                               botName: BOT_NAMES[Math.floor(Math.random() * BOT_NAMES.length)],
+                               difficulty: 'hard',
+                               gameStatus: 'playing',
+                               wordWinner: null,
+                               currentInput: '',
+                               targetIsFront: Math.random() > 0.5
+                            });
+                            setVocabView('versus_play');
+                         }}
+                         className="w-full p-4 rounded-2xl border-2 border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/10 hover:bg-red-100 dark:hover:bg-red-900/20 text-left transition-all cursor-pointer flex justify-between items-center group"
+                       >
+                         <div>
+                            <h4 className="font-bold text-red-700 dark:text-red-400 text-lg">Schwer</h4>
+                            <p className="text-sm text-red-600/80 dark:text-red-400/80 font-medium">5-8s Reaktionszeit • 4 Punkte pro Wort</p>
+                         </div>
+                         <div className="w-10 h-10 rounded-full bg-red-200 dark:bg-red-800 flex items-center justify-center group-hover:scale-110 transition-transform">
+                            <Flame className="w-5 h-5 text-red-700 dark:text-red-400" />
+                         </div>
+                       </button>
+                    </div>
+                 </div>
+              )}
+
+              {/* Versus Play View */}
+              {vocabView === 'versus_play' && versusSession && (
+                 <div className="flex-1 overflow-y-auto p-4 sm:p-6 pb-[calc(env(safe-area-inset-bottom)+1rem)] max-w-xl mx-auto w-full flex flex-col">
+                    {versusSession.gameStatus !== 'game_over' ? (
+                       <>
+                         <div className="flex items-center justify-between mb-8 bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700">
+                            <div className="flex flex-col items-center flex-1">
+                               <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center mb-1">
+                                 <span className="text-xl font-bold text-primary">{versusSession.userScore}</span>
+                               </div>
+                               <span className="text-xs font-bold text-slate-500 uppercase">Du</span>
+                            </div>
+                            
+                            <div className="px-4">
+                               <span className="text-2xl font-bold text-slate-300 dark:text-slate-600">vs</span>
+                            </div>
+
+                            <div className="flex flex-col items-center flex-1">
+                               <div className="w-12 h-12 bg-danger/10 rounded-full flex items-center justify-center mb-1 relative">
+                                 <span className="text-xl font-bold text-danger">{versusSession.botScore}</span>
+                                 {versusSession.gameStatus === 'playing' && (
+                                   <div className="absolute -bottom-1 -right-1 w-4 h-4 text-xs animate-bounce">🤔</div>
+                                 )}
+                               </div>
+                               <span className="text-xs font-bold text-slate-500 uppercase">{versusSession.botName}</span>
+                            </div>
+                         </div>
+                         
+                         <div className="w-full bg-slate-200 dark:bg-slate-700 h-2 rounded-full mb-8 overflow-hidden">
+                            <div 
+                              className="h-full bg-indigo-500 transition-all duration-300 rounded-full"
+                              style={{ width: `${(versusSession.currentIndex / versusSession.words.length) * 100}%` }}
+                            />
+                         </div>
+
+                         <div className="flex-1 flex flex-col">
+                           <div className="flex-1 bg-white dark:bg-slate-800 rounded-[2.5rem] border-2 border-slate-200 border-b-8 border-r-8 dark:border-slate-700 shadow-sm flex flex-col items-center justify-center p-8 mb-8 min-h-[300px]">
+                             <span className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">Wort {versusSession.currentIndex + 1} / {versusSession.words.length}</span>
+                             <h3 className="text-4xl sm:text-5xl font-display font-medium text-slate-900 dark:text-white text-center break-words">
+                               {versusSession.targetIsFront ? versusSession.words[versusSession.currentIndex].back : versusSession.words[versusSession.currentIndex].front}
+                             </h3>
+
+                             {versusSession.gameStatus === 'word_finished' && (
+                               <motion.div 
+                                 initial={{ opacity: 0, scale: 0.8 }}
+                                 animate={{ opacity: 1, scale: 1 }}
+                                 className={`mt-8 px-6 py-3 rounded-xl font-bold text-lg ${versusSession.wordWinner === 'user' ? 'bg-success/20 text-success' : 'bg-danger/20 text-danger'}`}
+                               >
+                                 {versusSession.wordWinner === 'user' ? 'Gute Arbeit! Punkt für dich.' : `Zu langsam! ${versusSession.botName} hat gepunktet.`}
+                               </motion.div>
+                             )}
+                             {versusSession.gameStatus === 'word_finished' && (
+                               <motion.div 
+                                 initial={{ opacity: 0, y: 10 }}
+                                 animate={{ opacity: 1, y: 0 }}
+                                 className="mt-6 pt-6 border-t-2 border-dashed border-slate-200 dark:border-slate-700 w-[80%] mx-auto text-center"
+                               >
+                                  <span className="text-sm text-slate-500 font-bold block mb-2">Lösung:</span>
+                                  <h4 className="text-2xl font-display font-bold text-primary break-words">
+                                    {versusSession.targetIsFront ? versusSession.words[versusSession.currentIndex].front : versusSession.words[versusSession.currentIndex].back}
+                                  </h4>
+                               </motion.div>
+                             )}
+                           </div>
+                           
+                           {versusSession.gameStatus === 'playing' ? (
+                             <div className="flex gap-2">
+                               <input
+                                 type="text"
+                                 autoFocus
+                                 placeholder="Übersetzung eingeben..."
+                                 value={versusSession.currentInput}
+                                 onChange={(e) => setVersusSession({...versusSession, currentInput: e.target.value})}
+                                 onKeyDown={(e) => {
+                                   if (e.key === 'Enter' && versusSession.currentInput.trim()) {
+                                      const expected = versusSession.targetIsFront ? versusSession.words[versusSession.currentIndex].front : versusSession.words[versusSession.currentIndex].back;
+                                      if (versusSession.currentInput.trim().toLowerCase() === expected.toLowerCase()) {
+                                         setVersusSession({
+                                            ...versusSession,
+                                            userScore: versusSession.userScore + 1,
+                                            gameStatus: 'word_finished',
+                                            wordWinner: 'user'
+                                         });
+                                      } else {
+                                         // wrong answer indication could be added, but for now we just let bots win or user retry until bot wins or user enters correct
+                                         setVersusSession({
+                                            ...versusSession,
+                                            currentInput: ''
+                                         });
+                                      }
+                                   }
+                                 }}
+                                 className="flex-1 p-4 rounded-2xl bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 outline-none focus:border-primary text-slate-900 dark:text-white shadow-sm font-medium text-lg placeholder:text-slate-400"
+                               />
+                               <button 
+                                 onClick={() => {
+                                    if (versusSession.currentInput.trim()) {
+                                      const expected = versusSession.targetIsFront ? versusSession.words[versusSession.currentIndex].front : versusSession.words[versusSession.currentIndex].back;
+                                      if (versusSession.currentInput.trim().toLowerCase() === expected.toLowerCase()) {
+                                         setVersusSession({
+                                            ...versusSession,
+                                            userScore: versusSession.userScore + 1,
+                                            gameStatus: 'word_finished',
+                                            wordWinner: 'user'
+                                         });
+                                      } else {
+                                         setVersusSession({...versusSession, currentInput: ''});
+                                      }
+                                    }
+                                 }}
+                                 className="px-6 bg-primary text-white font-bold rounded-2xl active:scale-[0.98] transition-all cursor-pointer shadow-md"
+                               >
+                                 <ChevronRight className="w-6 h-6" />
+                               </button>
+                             </div>
+                           ) : (
+                             <div className="h-[64px] flex items-center justify-center">
+                                <p className="text-slate-500 font-bold animate-pulse text-sm">Nächstes Wort wird vorbereitet...</p>
+                             </div>
+                           )}
+                         </div>
+                       </>
+                    ) : (
+                       <div className="flex-1 flex flex-col items-center justify-center text-center">
+                          {versusSession.userScore > versusSession.botScore ? (
+                            <Trophy className="w-24 h-24 text-amber-500 mb-6 drop-shadow-lg" />
+                          ) : versusSession.userScore === versusSession.botScore ? (
+                            <Swords className="w-24 h-24 text-slate-400 mb-6 drop-shadow-lg" />
+                          ) : (
+                            <Ghost className="w-24 h-24 text-danger mb-6 drop-shadow-lg" />
+                          )}
+                          
+                          <h2 className="text-4xl font-display font-bold text-slate-900 dark:text-white mb-2">
+                             {versusSession.userScore > versusSession.botScore ? 'Gewonnen!' : versusSession.userScore === versusSession.botScore ? 'Unentschieden!' : 'Verloren!'}
+                          </h2>
+                          <p className="text-lg text-slate-600 dark:text-slate-300 mb-8 font-medium">
+                             Du hast {versusSession.userScore} : {versusSession.botScore} gegen {versusSession.botName} gespielt.
+                          </p>
+                          
+                          <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 border-2 border-slate-100 dark:border-slate-700 w-full mb-8 shadow-sm">
+                             <div className="flex justify-between items-center mb-6">
+                                <span className="font-bold text-slate-500 uppercase tracking-wider text-sm">Schwierigkeit</span>
+                                <span className="font-bold text-lg font-display text-slate-900 dark:text-white capitalize">
+                                   {versusSession.difficulty === 'easy' ? 'Einfach' : versusSession.difficulty === 'medium' ? 'Mittel' : 'Schwer'}
+                                </span>
+                             </div>
+                             <div className="flex justify-between items-center">
+                                <span className="font-bold text-slate-500 uppercase tracking-wider text-sm">Punkte verdient</span>
+                                <span className="font-bold text-3xl font-display text-primary flex items-center gap-2">
+                                   +{versusSession.userScore * (versusSession.difficulty === 'easy' ? 1 : versusSession.difficulty === 'medium' ? 2 : 4)} <Target className="w-6 h-6"/>
+                                </span>
+                             </div>
+                          </div>
+                          
+                          <button 
+                            onClick={() => {
+                               const pointsMulti = versusSession.difficulty === 'easy' ? 1 : versusSession.difficulty === 'medium' ? 2 : 4;
+                               const pointsGained = versusSession.userScore * pointsMulti;
+                               if (pointsGained > 0) {
+                                   setProfile(prev => {
+                                      const todayStr = new Date().toLocaleDateString();
+                                      let newStreak = prev.vocabStreak || 0;
+                                      if (prev.lastVocabDate) {
+                                          const lastDate = new Date(prev.lastVocabDate);
+                                          if (lastDate.toLocaleDateString() !== todayStr) {
+                                              const diffDays = Math.round((new Date().setHours(0,0,0,0) - lastDate.setHours(0,0,0,0)) / (1000 * 60 * 60 * 24));
+                                              if (diffDays === 1) newStreak++;
+                                              else if (diffDays > 1) newStreak = 1;
+                                          }
+                                          if (newStreak === 0) newStreak = 1;
+                                      } else {
+                                          newStreak = 1;
+                                      }
+                                      return {
+                                         ...prev,
+                                         vocabStreak: newStreak,
+                                         lastVocabDate: Date.now(),
+                                         points: prev.points + pointsGained,
+                                         history: [
+                                            {
+                                              id: Math.random().toString(36).substr(2, 9),
+                                              type: 'vocab',
+                                              date: Date.now(),
+                                              points: pointsGained,
+                                              value: versusSession.userScore,
+                                              comment: `Versus Mode vs ${versusSession.botName} (${versusSession.userScore}/${versusSession.words.length})`,
+                                            },
+                                            ...prev.history
+                                         ]
+                                      };
+                                   });
+                                   triggerCelebration("Multiplayer beendet!", `+${pointsGained} Punkte`);
+                               }
+                               setVocabView('lists');
+                               setVersusSession(null);
+                            }}
+                            className="w-full bg-primary text-white font-bold py-5 rounded-2xl shadow-xl shadow-primary/20 active:scale-[0.98] transition-all text-lg cursor-pointer"
+                          >
+                            Punkte einsammeln & schließen
+                          </button>
+                       </div>
+                    )}
+                 </div>
+              )}
+
+              {/* Stats View */}
+              {vocabView === 'stats' && (
+                 <div className="flex-1 overflow-y-auto p-4 sm:p-6 pb-[calc(env(safe-area-inset-bottom)+1rem)] max-w-2xl mx-auto w-full">
+                    <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col mb-6">
+                      <div className="flex items-center gap-4 mb-8">
+                        <div className="w-14 h-14 bg-primary/10 rounded-2xl flex items-center justify-center">
+                          <BarChart3 className="w-7 h-7 text-primary" />
+                        </div>
+                        <div>
+                           <h3 className="text-2xl font-bold font-display text-slate-900 dark:text-white">Lern-Statistik</h3>
+                           <p className="text-sm font-medium text-slate-500">Dein Fortschritt beim Vokabellernen</p>
+                        </div>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="p-5 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800">
+                           <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">Gelernte Wörter</span>
+                           <span className="text-4xl font-display font-bold text-slate-900 dark:text-white">
+                             {profile.history.filter(h => h.type === 'vocab').reduce((acc, curr) => acc + Number(curr.value || 0), 0)}
+                           </span>
+                        </div>
+                        <div className="p-5 bg-primary/5 dark:bg-primary/10 rounded-2xl border border-primary/20">
+                           <span className="text-xs font-bold text-primary/70 uppercase tracking-wider block mb-2">Gesammelte Punkte</span>
+                           <span className="text-4xl font-display font-bold text-primary">
+                             {profile.history.filter(h => h.type === 'vocab').reduce((acc, curr) => acc + (curr.points || 0), 0)}
+                           </span>
+                        </div>
+                      </div>
+                    </div>
+                 </div>
+              )}
+
             </motion.div>
           </div>
         )}
@@ -3647,6 +5951,60 @@ export default function App() {
                   Bestätigen
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Reminders Modal */}
+        {remindersToShow.length > 0 && (
+          <div key="modal-reminders" className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-sm w-full shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col max-h-[80vh]"
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-12 h-12 bg-primary/20 rounded-full flex items-center justify-center text-primary shrink-0">
+                  <Bell className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-display font-bold text-slate-900 dark:text-white leading-tight">Erinnerungen!</h3>
+                  <p className="text-sm text-slate-500 font-medium">Das steht bald an:</p>
+                </div>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto min-h-0 space-y-3 mb-6 pr-2 hide-scrollbar">
+                {remindersToShow.map(r => (
+                  <div key={r.id} className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-4 rounded-xl flex items-start gap-3">
+                    <div className={`mt-0.5 p-1.5 rounded-lg shrink-0 ${r.type === 'exam' ? 'bg-danger/10 text-danger' : 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400'}`}>
+                      {r.type === 'exam' ? <Bell className="w-4 h-4" /> : <ListTodo className="w-4 h-4" />}
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider font-bold mb-0.5" style={{ color: r.type === 'exam' ? '#ef4444' : '#6366f1' }}>
+                        {r.type === 'exam' ? 'Arbeit/Test' : 'Termin'}
+                      </div>
+                      <div className="font-bold text-slate-900 dark:text-white leading-snug">{r.title}</div>
+                      <div className="text-xs text-slate-500 mt-1 flex items-center gap-1 font-medium">
+                        <Calendar className="w-3 h-3" /> Am {new Date(r.date).toLocaleDateString()}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              
+              <button 
+                onClick={() => {
+                  const dismissed = remindersToShow.map(r => r.id);
+                  setProfile(p => ({
+                    ...p,
+                    dismissedReminders: [...(p.dismissedReminders || []), ...dismissed]
+                  }));
+                  setRemindersToShow([]);
+                }} 
+                className="w-full py-4 bg-primary text-white font-bold rounded-2xl active:scale-95 transition-all shadow-lg shadow-primary/20"
+              >
+                Okay, hab's gesehen
+              </button>
             </motion.div>
           </div>
         )}
