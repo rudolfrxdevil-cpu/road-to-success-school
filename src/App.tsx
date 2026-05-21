@@ -67,10 +67,6 @@ import {
   ImagePlus
 } from 'lucide-react';
 import { SOCIAL_POSTS, SocialPost } from './lib/socialPosts';
-import { db, auth } from './lib/firebase';
-import { collection, onSnapshot, query, orderBy, addDoc, serverTimestamp, updateDoc, doc, increment } from 'firebase/firestore';
-import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { handleFirestoreError, OperationType } from './lib/firebaseErrors';
 import { 
   BarChart, 
   Bar, 
@@ -212,7 +208,6 @@ interface UserProfile {
   dismissedReminders?: string[]; // IDs of events we already reminded about today
   socialPosts?: SocialPost[];
   socialFollowers?: number;
-  isOnlineMode?: boolean;
 }
 
 type Tab = 'dashboard' | 'schedule' | 'stats' | 'achievements' | 'multiplayer' | 'online-challenges' | 'dev';
@@ -884,58 +879,6 @@ function ProgressBar({ progress, color }: { progress: number; color: string }) {
 // --- Main Component ---
 
 export default function App() {
-  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
-  const [globalSocialPosts, setGlobalSocialPosts] = useState<SocialPost[]>([]);
-  const [isCostLimitReached, setIsCostLimitReached] = useState(false);
-  const [showCostLimitWarning, setShowCostLimitWarning] = useState(false);
-
-  useEffect(() => {
-    // Listen to global config for cost limits
-    const configUnsubscribe = onSnapshot(doc(db, 'config', 'status'), (docSnap) => {
-       if (docSnap.exists()) {
-          const reached = docSnap.data().costLimitReached === true;
-          setIsCostLimitReached(reached);
-          if (reached) {
-             setShowCostLimitWarning(true);
-          }
-       }
-    }, (error) => {
-       console.error("Could not load config", error);
-    });
-    
-    return () => configUnsubscribe();
-  }, []);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setFirebaseUser(user);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    const q = query(collection(db, 'socialPosts'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const posts: SocialPost[] = [];
-      snapshot.forEach(d => {
-        const data = d.data();
-        posts.push({
-          id: d.id,
-          author: data.author,
-          content: data.content,
-          likes: data.likes || 0,
-          comments: data.comments || 0,
-          mediaUrl: data.mediaUrl,
-          mediaType: data.mediaType
-        });
-      });
-      setGlobalSocialPosts(posts);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'socialPosts');
-    });
-    return () => unsubscribe();
-  }, []);
-
   const [authUsername, setAuthUsername] = useState<string | null>(() => localStorage.getItem('auth_username'));
 
   const [multiplayerViewMode, setMultiplayerViewMode] = useState<'standings' | 'stats'>('standings');
@@ -956,7 +899,6 @@ export default function App() {
       if (!parsed.schedule) parsed.schedule = { 0: [], 1: [], 2: [], 3: [], 4: [] };
       if (typeof parsed.streak !== 'number') parsed.streak = 0;
       if (typeof parsed.lastLoginDate !== 'number') parsed.lastLoginDate = 0;
-      if (typeof parsed.isOnlineMode !== 'boolean') parsed.isOnlineMode = true;
       if (!parsed.diary) parsed.diary = [];
       if (!parsed.estimatedGrades) parsed.estimatedGrades = {};
       return parsed;
@@ -970,12 +912,9 @@ export default function App() {
       history: [],
       schedule: { 0: [], 1: [], 2: [], 3: [], 4: [] },
       diary: [],
-      estimatedGrades: {},
-      isOnlineMode: true
+      estimatedGrades: {}
     };
   });
-
-  const isOnlineModeActive = (profile.isOnlineMode !== false) && !isCostLimitReached;
 
   // Check multiplayer progression
   useEffect(() => {
@@ -1268,9 +1207,7 @@ export default function App() {
   const [socialView, setSocialView] = useState<'fyp' | 'create' | 'profile'>('fyp');
   const [socialProfileTab, setSocialProfileTab] = useState<'posts' | 'likes'>('posts');
   const [viewingSocialPost, setViewingSocialPost] = useState<SocialPost | null>(null);
-  const userSocialPosts = isOnlineModeActive 
-    ? (firebaseUser ? globalSocialPosts.filter(p => p.authorId === firebaseUser.uid) : [])
-    : (profile.socialPosts || []);
+  const userSocialPosts = profile.socialPosts || [];
   const socialFollowers = profile.socialFollowers || 42;
   const [createPostContent, setCreatePostContent] = useState('');
   const [createPostMediaUrl, setCreatePostMediaUrl] = useState<string | null>(null);
@@ -3276,9 +3213,6 @@ export default function App() {
                   <h2 className="text-3xl font-display font-black text-slate-900 dark:text-white uppercase tracking-tight">
                     {profile.multiplayer ? LEAGUES[profile.multiplayer.leagueLevel].name : 'Laden...'}
                   </h2>
-                  <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-1">
-                    {isOnlineModeActive ? 'Gegen echte Spieler (Online)' : 'Gegen Bots (Offline)'}
-                  </p>
                   <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-2">Endet diesen Sonntag um Mitternacht</p>
                 </div>
                 {profile.multiplayer?.lastResults && (
@@ -4280,7 +4214,7 @@ export default function App() {
             <div className="flex-1 relative">
               {socialView === 'fyp' && (
                 <div className="absolute inset-0 overflow-y-scroll snap-y snap-mandatory hide-scrollbar">
-                  {[...(isOnlineModeActive ? globalSocialPosts : (profile.socialPosts || [])), ...SOCIAL_POSTS].map((post) => (
+                  {[...userSocialPosts, ...SOCIAL_POSTS].map((post) => (
                     <div key={post.id} className="min-h-[100dvh] h-[100dvh] w-full snap-start relative flex flex-col overflow-hidden">
                         <div className="absolute inset-0 bg-gradient-to-b from-indigo-900/20 via-purple-900/20 to-black/80 pointer-events-none"></div>
                         {post.mediaUrl && post.mediaType === 'image' && (
@@ -4298,27 +4232,9 @@ export default function App() {
                         </div>
                         
                         <div className="absolute bottom-20 right-4 sm:right-6 flex flex-col items-center gap-6 z-20 pb-safe">
-                          <button className="flex flex-col items-center gap-1 group" onClick={async (e) => {
+                          <button className="flex flex-col items-center gap-1 group" onClick={(e) => {
                               const el = e.currentTarget.querySelector('svg');
                               if(el) { el.classList.remove('text-white'); el.classList.add('text-pink-500', 'fill-pink-500'); }
-                              if (globalSocialPosts.find(p => p.id === post.id)) {
-                                 // Online post
-                                 if (!firebaseUser) {
-                                    try {
-                                      const provider = new GoogleAuthProvider();
-                                      await signInWithPopup(auth, provider);
-                                    } catch (err) {
-                                      return; 
-                                    }
-                                 }
-                                 try {
-                                    await updateDoc(doc(db, 'socialPosts', post.id), {
-                                        likes: increment(1)
-                                    });
-                                 } catch(e) {
-                                  console.error("Could not like online post", e);
-                                 }
-                              }
                           }}>
                             <div className="p-2 rounded-full group-hover:bg-white/10 transition-colors">
                               <Heart className="w-8 sm:w-10 h-8 sm:h-10 text-white transition-colors drop-shadow-md" />
@@ -4401,55 +4317,30 @@ export default function App() {
                    
                    <div className="mt-auto pt-4 pb-20">
                      <button 
-                       onClick={async () => {
-                          if (isOnlineModeActive && !firebaseUser) {
-                            try {
-                              const provider = new GoogleAuthProvider();
-                              await signInWithPopup(auth, provider);
-                            } catch (error) {
-                              alert("Bitte logge dich ein, um Online zu posten!");
-                              return;
-                            }
-                          }
+                       onClick={() => {
+                          const likes = Math.floor(Math.random() * 1000) + 10;
+                          const comments = Math.floor(Math.random() * 100) + 1;
+                          const newFollowers = Math.floor(Math.random() * 200) + 20;
                           
-                          if (createPostMediaUrl && createPostMediaUrl.length > 500000) {
-                            alert("Datei ist zu groß! Bitte wähle ein kleineres Bild.");
-                            return;
-                          }
-
-                          const newPost: any = {
+                          const newPost = {
+                            id: `user_${Date.now()}`,
                             author: `@${profile.name || 'User'}`,
-                            authorId: (isOnlineModeActive && auth.currentUser) ? auth.currentUser.uid : 'local_user',
                             content: createPostContent,
-                            likes: 0,
-                            comments: 0,
+                            likes,
+                            comments,
                             mediaUrl: createPostMediaUrl || undefined,
-                            mediaType: (createPostMediaType as 'image' | 'video') || undefined,
-                            createdAt: isOnlineModeActive ? serverTimestamp() : Date.now()
+                            mediaType: (createPostMediaType as 'image' | 'video') || undefined
                           };
-                          
-                          try {
-                            const newFollowers = Math.floor(Math.random() * 200) + 20;
-                            // Update local profile
-                            setProfile(prev => ({
-                              ...prev,
-                              socialFollowers: (prev.socialFollowers || 42) + newFollowers,
-                              ...(isOnlineModeActive ? {} : { socialPosts: [{ ...newPost, id: `local_${Date.now()}` }, ...(prev.socialPosts || [])] })
-                            }));
-                            triggerCelebration("Post Online!", `Du hast ${newFollowers} neue Follower!`);
-                            
-                            if (isOnlineModeActive) {
-                              await addDoc(collection(db, 'socialPosts'), newPost);
-                            }
-                            
-                            setCreatePostContent('');
-                            setCreatePostMediaUrl(null);
-                            setCreatePostMediaType(null);
-                            setSocialView('fyp');
-                          } catch (error) {
-                            console.error(error);
-                            alert("Fehler beim Hochladen des Posts.");
-                          }
+                          setProfile(prev => ({
+                            ...prev,
+                            socialPosts: [newPost, ...(prev.socialPosts || [])],
+                            socialFollowers: (prev.socialFollowers || 42) + newFollowers
+                          }));
+                          triggerCelebration("Post Online!", `Du hast ${newFollowers} neue Follower!`);
+                          setCreatePostContent('');
+                          setCreatePostMediaUrl(null);
+                          setCreatePostMediaType(null);
+                          setSocialView('profile');
                        }}
                        disabled={!createPostContent.trim() && !createPostMediaUrl}
                        className="w-full py-4 bg-pink-600 hover:bg-pink-500 text-white font-bold rounded-xl disabled:opacity-50 disabled:hover:bg-pink-600 transition-colors shadow-lg shadow-pink-600/30"
@@ -4658,11 +4549,7 @@ export default function App() {
                            <Swords className="w-10 h-10 text-indigo-500" />
                         </div>
                         <h3 className="text-2xl sm:text-3xl font-display font-bold text-slate-900 dark:text-white mb-2">Wähle ein Fach</h3>
-                        <p className="text-slate-500 max-w-sm mx-auto">
-                          {isOnlineModeActive 
-                            ? "Tritt gegen echte Spieler online an und sammle extra Punkte im Quiz Mode!"
-                            : "Tritt gegen unsere klugen Bots an (Offline) und sammle extra Punkte im Quiz Mode!"}
-                        </p>
+                        <p className="text-slate-500 max-w-sm mx-auto">Tritt gegen unsere klugen Bots an und sammle extra Punkte im Quiz Mode!</p>
                      </div>
 
                      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden mb-8">
@@ -5989,38 +5876,6 @@ export default function App() {
           </div>
         )}
 
-        {showCostLimitWarning && (
-          <div key="modal-cost-limit" className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowCostLimitWarning(false)}
-              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="relative w-full max-w-sm bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl text-center"
-            >
-              <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 text-red-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                 <AlertTriangle className="w-8 h-8" />
-              </div>
-              <h3 className="font-display font-bold text-xl text-slate-900 dark:text-white mb-2">Achtung: Kostenlimit erreicht</h3>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
-                Das App-Kostenlimit ist fast erreicht. Um hohe Serverkosten zu vermeiden, wurden alle Online-Features (Multiplayer, FYP) vorübergehend automatisch deaktiviert. Die App funktioniert weiterhin perfekt im Offline-Modus!
-              </p>
-              <button 
-                onClick={() => setShowCostLimitWarning(false)}
-                className="w-full bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 font-bold py-4 rounded-2xl shadow-xl active:scale-[0.98] transition-all"
-              >
-                Verstanden
-              </button>
-            </motion.div>
-          </div>
-        )}
-
         {isSettingsOpen && (
           <div key="modal-settings" className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
             <motion.div 
@@ -6050,20 +5905,6 @@ export default function App() {
                   onChange={(e) => setTempGrade(e.target.value)}
                   className="w-full px-4 py-4 bg-slate-50 dark:bg-slate-800 dark:text-white border-2 border-transparent focus:bg-white dark:focus:bg-slate-900 focus:border-primary/30 focus:shadow-md focus:-translate-y-0.5 rounded-2xl text-sm font-semibold outline-none transition-all duration-300"
                 />
-
-                <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl">
-                  <div>
-                    <label className="text-sm font-bold text-slate-900 dark:text-white block">Online-Features</label>
-                    <p className="text-xs text-slate-500">Global FYP, VS-Modus, Multiplayer Ligen</p>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" className="sr-only peer" checked={profile.isOnlineMode !== false} onChange={(e) => {
-                       setProfile(prev => ({...prev, isOnlineMode: e.target.checked}));
-                    }} />
-                    <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-primary"></div>
-                  </label>
-                </div>
-
                 <div>
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">Themen Farbe</label>
                   <div className="flex gap-3">

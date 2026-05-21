@@ -1,7 +1,6 @@
 export interface SocialPost {
   id: string;
   author: string;
-  authorId?: string;
   content: string;
   likes: number;
   comments: number;
