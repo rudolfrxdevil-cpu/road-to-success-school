@@ -4300,7 +4300,7 @@ export default function App() {
                    {createPostMediaUrl && createPostMediaType === 'image' && (
                      <div className="relative w-full h-48 mb-6 rounded-xl overflow-hidden bg-black flex items-center justify-center">
                        <img src={createPostMediaUrl} className="max-w-full max-h-full object-contain" alt="Preview"/>
-                       <button onClick={() => setCreatePostMediaUrl(null)} className="absolute top-2 right-2 p-2 bg-black/70 hover:bg-black/90 rounded-full text-white">
+                       <button onClick={() => { setCreatePostMediaUrl(null); setCreatePostMediaType(null); }} className="absolute top-2 right-2 p-2 bg-black/70 hover:bg-black/90 rounded-full text-white">
                          <X className="w-4 h-4" />
                        </button>
                      </div>
@@ -4309,7 +4309,7 @@ export default function App() {
                    {createPostMediaUrl && createPostMediaType === 'video' && (
                      <div className="relative w-full h-48 mb-6 rounded-xl overflow-hidden bg-black flex items-center justify-center">
                        <video src={createPostMediaUrl} controls playsInline className="max-w-full max-h-full" />
-                       <button onClick={() => setCreatePostMediaUrl(null)} className="absolute top-2 right-2 p-2 bg-black/70 hover:bg-black/90 rounded-full text-white z-10">
+                       <button onClick={() => { setCreatePostMediaUrl(null); setCreatePostMediaType(null); }} className="absolute top-2 right-2 p-2 bg-black/70 hover:bg-black/90 rounded-full text-white z-10">
                          <X className="w-4 h-4" />
                        </button>
                      </div>

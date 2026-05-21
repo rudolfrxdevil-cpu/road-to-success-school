@@ -31,7 +31,8 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: '100gb' }));
+  app.use(express.urlencoded({ limit: '100gb', extended: true }));
 
   // APIs
   app.post("/api/auth/register", async (req, res) => {
