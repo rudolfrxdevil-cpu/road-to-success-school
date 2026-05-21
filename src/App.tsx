@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { get, set } from 'idb-keyval';
 import { motion, AnimatePresence } from 'motion/react';
 import { QuizQuestion, ENGLISH_QUIZ_QUESTIONS, MATH_QUIZ_QUESTIONS, FRENCH_QUIZ_QUESTIONS, GERMAN_QUIZ_QUESTIONS } from './lib/quizData';
 import confetti from 'canvas-confetti';
@@ -514,7 +515,7 @@ const CHALLENGE_POOL = [
   { id: 'm_ch', type: 'subject_participation', subject: 'Chemie', target: 3, title: 'Melde dich 3x in Chemie' },
   { id: 'm_hi', type: 'subject_participation', subject: 'Geschichte', target: 3, title: 'Melde dich 3x in Geschichte' },
   { id: 'm_ge', type: 'subject_participation', subject: 'Erdkunde', target: 3, title: 'Melde dich 3x in Erdkunde' },
-  { id: 'm_sp', type: 'subject_participation', subject: 'Sport', target: 3, title: 'Melde dich 3x in Sport' },
+  { id: 'm_in', type: 'subject_participation', subject: 'Informatik', target: 3, title: 'Melde dich 3x in Informatik' },
   { id: 'm_ku', type: 'subject_participation', subject: 'Kunst', target: 3, title: 'Melde dich 3x in Kunst' },
   { id: 'm_mu', type: 'subject_participation', subject: 'Musik', target: 3, title: 'Melde dich 3x in Musik' },
   { id: 'm_re', type: 'subject_participation', subject: 'Religion', target: 3, title: 'Melde dich 3x in Religion' },
@@ -640,7 +641,7 @@ function initMultiplayerData(leagueLevel: number, weekStart: number): Multiplaye
   }
 
   // Generate 100 Initial Online Challenges
-  const SUBJECTS = ['Englisch', 'Mathe', 'Deutsch', 'Geschichte', 'Physik', 'Chemie', 'Biologie', 'Informatik', 'Kunst', 'Musik', 'Sport'];
+  const SUBJECTS = ['Englisch', 'Mathe', 'Deutsch', 'Geschichte', 'Physik', 'Chemie', 'Biologie', 'Informatik', 'Kunst', 'Musik', 'Religion'];
   const challengeDefinitions = [
     { type: 'participations', targets: [10, 25, 50, 100], rewardMult: 10 },
     { type: 'practice', targets: [60, 120, 300, 600], rewardMult: 2 },
@@ -1458,7 +1459,41 @@ export default function App() {
   };
 
   useEffect(() => {
-    localStorage.setItem('klassenheld_profile', JSON.stringify(profile));
+    // Try to recover full profile from IDB first (offline fallback for big data)
+    get('klassenheld_profile').then(saved => {
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          setProfile(prev => ({ 
+             ...prev, 
+             ...parsed,
+             // Merge fields carefully if needed
+          }));
+        } catch(e) {}
+      }
+    });
+
+    if (authUsername) {
+      fetch(`/api/profile/${authUsername}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.success && data.profile) {
+            setProfile(data.profile);
+          }
+        })
+        .catch(console.error);
+    }
+  }, [authUsername]);
+
+  useEffect(() => {
+    // Attempt local storage sync (might fail on 5MB quota)
+    try {
+      localStorage.setItem('klassenheld_profile', JSON.stringify(profile));
+    } catch (e) {
+      console.warn("Storage quota exceeded", e);
+    }
+    // Reliable client DB fallback for large base64 videos
+    set('klassenheld_profile', JSON.stringify(profile)).catch(console.error);
 
     // Sync to server if authenticated
     if (authUsername) {
@@ -1477,7 +1512,7 @@ export default function App() {
             const localUsers = JSON.parse(localStorage.getItem('kh_users') || '{}');
             if (localUsers[authUsername]) {
                localUsers[authUsername].profile = profile;
-               localStorage.setItem('kh_users', JSON.stringify(localUsers));
+               try { localStorage.setItem('kh_users', JSON.stringify(localUsers)); } catch(err){}
             }
          }
       })
@@ -1488,7 +1523,7 @@ export default function App() {
          const localUsers = JSON.parse(localStorage.getItem('kh_users') || '{}');
          if (localUsers[authUsername]) {
             localUsers[authUsername].profile = profile;
-            localStorage.setItem('kh_users', JSON.stringify(localUsers));
+            try { localStorage.setItem('kh_users', JSON.stringify(localUsers)); } catch(err){}
          }
       })
       .finally(() => setIsSyncing(false));
@@ -4221,7 +4256,7 @@ export default function App() {
                            <img src={post.mediaUrl} className="absolute inset-0 w-full h-full object-cover opacity-60" alt="" />
                         )}
                         {post.mediaUrl && post.mediaType === 'video' && (
-                           <video src={post.mediaUrl} autoPlay loop muted playsInline className="absolute inset-0 w-full h-full object-cover opacity-60" />
+                           <video src={post.mediaUrl} autoPlay loop playsInline controls className="absolute inset-0 w-full h-full object-cover opacity-60 z-20" />
                         )}
                         <div className="relative z-10 flex-1 flex items-center justify-center p-6 sm:p-12 pb-40 pr-24">
                           {post.content && (
@@ -4463,7 +4498,7 @@ export default function App() {
                        <img src={viewingSocialPost.mediaUrl} className="absolute inset-0 w-full h-full object-cover opacity-60" alt="" />
                     )}
                     {viewingSocialPost.mediaUrl && viewingSocialPost.mediaType === 'video' && (
-                       <video src={viewingSocialPost.mediaUrl} autoPlay loop muted playsInline className="absolute inset-0 w-full h-full object-cover opacity-60" />
+                       <video src={viewingSocialPost.mediaUrl} autoPlay loop playsInline controls className="absolute inset-0 w-full h-full object-cover opacity-60 z-20" />
                     )}
                     <div className="relative z-10 flex-1 flex items-center justify-center p-6 sm:p-12 pb-40 pr-24 pointer-events-none">
                       {viewingSocialPost.content && (

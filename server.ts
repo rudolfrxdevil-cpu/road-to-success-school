@@ -85,6 +85,21 @@ async function startServer() {
     }
   });
 
+  app.get("/api/profile/:username", async (req, res) => {
+    try {
+      const { username } = req.params;
+      const db = await readDB();
+      const user = db.users[username];
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json({ success: true, profile: user.profile });
+    } catch (error: any) {
+      console.error(error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
   app.post("/api/profile", async (req, res) => {
     try {
       const { username, profile } = req.body;
