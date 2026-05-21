@@ -1,0 +1,26 @@
+{
+  "entities": {
+    "SocialPost": {
+      "title": "SocialPost",
+      "description": "A post on the global For You Page.",
+      "type": "object",
+      "properties": {
+        "author": { "type": "string" },
+        "authorId": { "type": "string" },
+        "content": { "type": "string" },
+        "likes": { "type": "number" },
+        "comments": { "type": "number" },
+        "mediaUrl": { "type": "string", "description": "Optional" },
+        "mediaType": { "type": "string", "enum": ["image", "video"], "description": "Optional" },
+        "createdAt": { "type": "number", "description": "Timestamp" }
+      },
+      "required": ["author", "authorId", "content", "likes", "comments", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/socialPosts/{postId}": {
+      "schema": { "$ref": "#/entities/SocialPost" },
+      "description": "Global posts Feed"
+    }
+  }
+}
