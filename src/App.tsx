@@ -3085,7 +3085,13 @@ export default function App() {
                           </div>
                         </div>
                       </div>
-                      <div className="text-right">
+                      <div className="text-right flex items-center gap-2">
+                        {subj.trend > 4.4 && (
+                           <div className="flex items-center gap-1 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider motion-preset-pulse">
+                             <AlertTriangle className="w-3 h-3" />
+                             Kritisch
+                           </div>
+                        )}
                         <p className="font-display font-bold text-lg" style={{ color: subj.trend <= 2.5 ? '#10b981' : subj.trend <= 4.0 ? '#f59e0b' : '#ef4444' }}>
                           {subj.trend.toFixed(1)}
                         </p>
@@ -6805,7 +6811,13 @@ export default function App() {
 
                 <div className="flex-1 overflow-y-auto min-h-0 space-y-6 pr-2">
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-orange-50 dark:bg-orange-500/10 p-4 rounded-3xl border border-orange-100 dark:border-orange-500/20">
+                    <div className="bg-orange-50 dark:bg-orange-500/10 p-4 rounded-3xl border border-orange-100 dark:border-orange-500/20 relative">
+                      {trend > 4.4 && (
+                         <div className="absolute -top-3 -right-3 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider shadow-sm flex items-center gap-1 motion-preset-pulse">
+                            <AlertTriangle className="w-3 h-3" />
+                            Kritisch
+                         </div>
+                      )}
                       <p className="text-orange-500 text-xs font-bold uppercase tracking-wider mb-1 flex items-center gap-1">
                         <TrendingUp className="w-4 h-4" /> Prognose
                       </p>
