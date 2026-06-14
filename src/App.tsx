@@ -5133,11 +5133,55 @@ export default function App() {
                              ))}
                           </div>
                           
-                          <button onClick={() => {
-                             setNewVocabWords([...newVocabWords, {front: '', back: ''}]);
-                          }} className="mt-4 flex items-center gap-2 text-sm font-bold text-primary hover:text-primary/80 transition-colors w-full p-4 bg-primary/5 rounded-xl justify-center border border-primary/20 hover:bg-primary/10 cursor-pointer">
-                            <Plus className="w-4 h-4" /> Weiteres Wort hinzufügen
-                          </button>
+                          <div className="mt-4 flex flex-col sm:flex-row gap-3">
+                            <button onClick={() => {
+                               setNewVocabWords([...newVocabWords, {front: '', back: ''}]);
+                            }} className="flex-1 flex items-center gap-2 text-sm font-bold text-primary transition-colors p-4 bg-primary/5 rounded-xl justify-center border border-primary/20 hover:bg-primary/10 cursor-pointer">
+                              <Plus className="w-4 h-4" /> Wort hinzufügen
+                            </button>
+                            <label className="flex-1 flex items-center gap-2 text-sm font-bold text-slate-700 dark:text-slate-300 transition-colors p-4 bg-slate-100 dark:bg-slate-800 rounded-xl justify-center border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer">
+                              <Upload className="w-4 h-4" /> CSV Import
+                              <input 
+                                type="file" 
+                                accept=".csv"
+                                className="hidden"
+                                onChange={(e) => {
+                                   const file = e.target.files?.[0];
+                                   if (!file) return;
+                                   const reader = new FileReader();
+                                   reader.onload = (event) => {
+                                     const text = event.target?.result as string;
+                                     if (text) {
+                                       const lines = text.split('\n');
+                                       const parsedWords = lines
+                                         .map(line => line.trim())
+                                         .filter(line => line.length > 0)
+                                         .map(line => {
+                                            const separator = line.includes(';') ? ';' : ',';
+                                            const parts = line.split(separator);
+                                            return {
+                                              front: parts[0]?.trim() || '',
+                                              back: parts.slice(1).join(separator).trim() || ''
+                                            };
+                                         })
+                                         .filter(w => w.front && w.back);
+                                         
+                                       if (parsedWords.length > 0) {
+                                         setNewVocabWords(prev => {
+                                            const existing = prev.filter(w => w.front.trim() || w.back.trim());
+                                            return [...existing, ...parsedWords];
+                                         });
+                                       } else {
+                                         alert("Konnte keine Wörter im CSV-Format finden.");
+                                       }
+                                     }
+                                   };
+                                   reader.readAsText(file);
+                                   e.target.value = '';
+                                }}
+                              />
+                            </label>
+                          </div>
                         </div>
                      </div>
                      <div className="mt-8">
