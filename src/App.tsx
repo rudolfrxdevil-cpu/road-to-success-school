@@ -5555,7 +5555,8 @@ export default function App() {
                                  onKeyDown={(e) => {
                                    if (e.key === 'Enter' && versusSession.currentInput.trim()) {
                                       const expected = versusSession.targetIsFront ? versusSession.words[versusSession.currentIndex].front : versusSession.words[versusSession.currentIndex].back;
-                                      if (versusSession.currentInput.trim().toLowerCase() === expected.toLowerCase()) {
+                                      const normalizeStr = (s: string) => s.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                                      if (normalizeStr(versusSession.currentInput) === normalizeStr(expected)) {
                                          setVersusSession({
                                             ...versusSession,
                                             userScore: versusSession.userScore + 1,
@@ -5577,7 +5578,8 @@ export default function App() {
                                  onClick={() => {
                                     if (versusSession.currentInput.trim()) {
                                       const expected = versusSession.targetIsFront ? versusSession.words[versusSession.currentIndex].front : versusSession.words[versusSession.currentIndex].back;
-                                      if (versusSession.currentInput.trim().toLowerCase() === expected.toLowerCase()) {
+                                      const normalizeStr = (s: string) => s.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                                      if (normalizeStr(versusSession.currentInput) === normalizeStr(expected)) {
                                          setVersusSession({
                                             ...versusSession,
                                             userScore: versusSession.userScore + 1,
