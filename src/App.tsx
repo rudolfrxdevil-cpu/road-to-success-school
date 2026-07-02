@@ -1958,17 +1958,36 @@ export default function App() {
     });
   }, [profile]);
 
-  const handleExportData = () => {
+  const handleExportData = async () => {
     const data = {
       profile: localStorage.getItem('klassenheld_profile'),
       users: localStorage.getItem('kh_users'),
       theme: localStorage.getItem('theme_color')
     };
+    const fileName = `klassenheld-backup-${new Date().toISOString().split('T')[0]}.json`;
+    const file = new File([JSON.stringify(data)], fileName, { type: 'application/json' });
+    
+    // In Android WebViews (like median.co), standard downloads often fail, 
+    // so we try the Web Share API first to let the user save/share the file.
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({
+          files: [file],
+          title: 'RoadToSuccess Backup',
+        });
+        setIsSidebarOpen(false);
+        return;
+      } catch (err) {
+        console.log("Share failed or was aborted:", err);
+      }
+    }
+    
+    // Fallback to standard web download
     const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `klassenheld-backup-${new Date().toISOString().split('T')[0]}.json`;
+    a.download = fileName;
     a.click();
     URL.revokeObjectURL(url);
     setIsSidebarOpen(false);
